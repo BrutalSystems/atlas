@@ -1,0 +1,58 @@
+name: Atlas nuget publish
+on:
+  push:
+      branches:
+          - '**'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Branch name
+        run: echo running on branch ${GITHUB_REF##*/}
+      - uses: actions/checkout@v3
+      - name: Setup .NET Core
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Extract and increment version from .csproj
+        id: extract-version
+        run: |
+          VERSION=$(grep -oP '(?<=<Version>)[^<]+' Atlas.csproj)
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+          PATCH=$((PATCH + 1))
+          NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+          echo "VERSION_NUMBER=$NEW_VERSION" >> $GITHUB_ENV
+        working-directory: ./Atlas
+        continue-on-error: false
+
+      - name: Update csproj version
+        run: |
+            chmod +x ./.scripts/updateVersion.sh
+            ./.scripts/updateVersion.sh "${VERSION_NUMBER}" "./Atlas/Atlas.csproj"
+        working-directory: ./
+        continue-on-error: false
+
+      - name: Commit version bump
+        run: |
+            git config --global user.name "github-actions[bot]"
+            git config --global user.email "github-actions[bot]@users.noreply.github.com"
+            git add .
+            git commit -m "Atlas build version ${VERSION_NUMBER}"
+            git push origin
+        continue-on-error: false
+        working-directory: ./Atlas
+
+      - run: git config --global user.name "GitHub Action"
+      - run: git config --global user.email "github-action@users.noreply.github.com"
+      - name: Publish package
+        run: |
+          pwd
+          cd ./.scripts
+          bash publish.sh
+        env:
+          ATLAS_VER: ${{ env.VERSION_NUMBER }}
+          ATLAS_RELEASE: -dbg
+          NUGET_TOKEN: ${{ secrets.NUGET_TOKEN }}
