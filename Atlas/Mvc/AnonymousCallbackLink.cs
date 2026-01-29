@@ -1,8 +1,5 @@
 ﻿namespace Atlas.Settings;
 
-/// <summary>
-/// Used for OAuth anonymous callbacks (see Maia QboController)
-/// </summary>
 public class AnonymousCallbackLink
 {
     public string? AuthUserId { get; set; } 
