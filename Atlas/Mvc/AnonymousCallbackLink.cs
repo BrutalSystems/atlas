@@ -1,4 +1,4 @@
-﻿namespace Atlas.Settings;
+﻿namespace Atlas.Mvc;
 
 public class AnonymousCallbackLink
 {

@@ -7,13 +7,12 @@ using Atlas.Extensions;
 using Atlas.Data;
 using Atlas.Helpers;
 using Microsoft.Extensions.Logging.Abstractions;
-using Atlas.Services.Authorization;
 
 namespace Atlas.Services;
 
 public class BaseService
 {
-    
+
 }
 
 /// <summary>
@@ -40,7 +39,7 @@ public class BaseService<TEntity, TContext> : BaseService where TEntity : BaseMo
             }
         }
     }
-    
+
     public BaseService(TContext context)
     {
         _context = context ?? throw new ArgumentNullException(nameof(context));
@@ -96,8 +95,17 @@ public class BaseService<TEntity, TContext> : BaseService where TEntity : BaseMo
         try
         {
             var total = await query.CountAsync(cancellationToken);
-            var data = await query.Skip(request?.Skip ?? 0).Take(request?.Take ?? 1000).ToListAsync(cancellationToken);
-
+            var dataQuery = query;
+            if (request?.Skip != null)
+            {
+                dataQuery = dataQuery.Skip(request.Skip.Value);
+            }
+            if (request?.Take != null)
+            {
+                dataQuery = dataQuery.Take(request.Take.GetValueOrDefault());
+            }
+            var data = await dataQuery.ToListAsync(cancellationToken);
+            
             return new ReadResponse<TEntity> { Data = data, LastRow = total };
         }
         catch (Exception ex)

@@ -1,6 +1,4 @@
-using Microsoft.AspNetCore.Mvc;
-
-namespace Atlas.Services.Authorization;
+namespace Atlas.Services;
 
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = true)]
 public class ServicePermissionsAttribute : Attribute

@@ -1,7 +1,8 @@
-using Atlas.Auth;
-using ByteAether.Ulid;
+using Atlas.Mvc;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.ValueGeneration;
+
+namespace Atlas.Data;
 
 public class TenantIdGenerator(UserContext userContext) : ValueGenerator<string?>
 {

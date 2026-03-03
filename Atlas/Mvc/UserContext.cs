@@ -1,12 +1,10 @@
-using System.ComponentModel;
 using System.Security.Claims;
 using Atlas.Extensions;
 using Atlas.Helpers;
 using Atlas.Settings;
 using Foundatio.Caching;
-using Microsoft.IdentityModel.Tokens;
 
-namespace Atlas.Auth;
+namespace Atlas.Mvc;
 
 //todo:  review this and make sure its CLEAN
 

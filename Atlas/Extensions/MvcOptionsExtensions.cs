@@ -1,5 +1,4 @@
-﻿using Atlas.Api.Middleware;
-using Atlas.Mvc;
+﻿using Atlas.Mvc;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ApplicationModels;
 using Microsoft.AspNetCore.Mvc.Routing;

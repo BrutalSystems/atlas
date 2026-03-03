@@ -1,8 +1,8 @@
 using System.ComponentModel.DataAnnotations;
 using System.Linq.Expressions;
-using Atlas.Auth;
 using Atlas.Helpers;
 using Atlas.Models;
+using Atlas.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.ValueGeneration;
@@ -164,7 +164,7 @@ public class BaseDbContext(DbContextOptions options, UserContext userContext) : 
     private void SetTenantFilter<TEntity>(ModelBuilder modelBuilder) where TEntity : class, ITenantScoped
     {
         // tenantId is only captured at setup time, not per-query
-        var tenantId = this.UserContext.TenantId;
+        // var tenantId = this.UserContext.TenantId;
         modelBuilder.Entity<TEntity>().HasQueryFilter(e =>
             (GetTenantId() == null) || e.TenantId == GetTenantId());
     }

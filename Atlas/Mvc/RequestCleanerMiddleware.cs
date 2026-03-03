@@ -1,7 +1,7 @@
-using Newtonsoft.Json.Linq;
 using System.Text;
+using Newtonsoft.Json.Linq;
 
-namespace Atlas.Api.Middleware;
+namespace Atlas.Mvc;
 
 public class RequestCleanerMiddleware(RequestDelegate next)
 {
