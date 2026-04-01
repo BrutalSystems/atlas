@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Atlas.Models;
 using Atlas.Extensions;
 using Atlas.Data;
+using Atlas.Exceptions;
 using Atlas.Helpers;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -12,7 +13,6 @@ namespace Atlas.Services;
 
 public class BaseService
 {
-
 }
 
 /// <summary>
@@ -27,6 +27,7 @@ public class BaseService<TEntity, TContext> : BaseService where TEntity : BaseMo
     protected readonly DbSet<TEntity> _dbSet;
     public virtual IQueryable<TEntity> Query => _dbSet.AsQueryable();
     protected ILogger Logger { get; private set; } = NullLogger.Instance;
+    public BaseValidator<TEntity>? Validator { get; set; }
 
     // injected by Autofac... so we can create a logger with the right type
     public ILoggerFactory? LoggerFactory
@@ -40,10 +41,11 @@ public class BaseService<TEntity, TContext> : BaseService where TEntity : BaseMo
         }
     }
 
-    public BaseService(TContext context)
+    public BaseService(TContext context, BaseValidator<TEntity>? validator = null)
     {
         _context = context ?? throw new ArgumentNullException(nameof(context));
         _dbSet = context.Set<TEntity>();
+        Validator = validator;
     }
 
     public TContext Context => _context;
@@ -100,12 +102,14 @@ public class BaseService<TEntity, TContext> : BaseService where TEntity : BaseMo
             {
                 dataQuery = dataQuery.Skip(request.Skip.Value);
             }
+
             if (request?.Take != null)
             {
                 dataQuery = dataQuery.Take(request.Take.GetValueOrDefault());
             }
+
             var data = await dataQuery.ToListAsync(cancellationToken);
-            
+
             return new ReadResponse<TEntity> { Data = data, LastRow = total };
         }
         catch (Exception ex)
@@ -149,6 +153,10 @@ public class BaseService<TEntity, TContext> : BaseService where TEntity : BaseMo
     /// <param name="entity">The entity to create</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>The created entity</returns>
+    protected virtual Task<List<string>?> BeforeSaveAsync(TEntity entity, bool isNew, CancellationToken cancellationToken = default) => Task.FromResult<List<string>?>(null);
+
+    protected virtual Task AfterSaveAsync(TEntity entity, bool isNew, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
     public virtual async Task<TEntity> CreateAsync(TEntity entity, CancellationToken cancellationToken = default)
     {
         await AccessCheck(entity);
@@ -156,8 +164,30 @@ public class BaseService<TEntity, TContext> : BaseService where TEntity : BaseMo
         if (entity == null)
             throw new ArgumentNullException(nameof(entity));
 
+        var comments = await BeforeSaveAsync(entity, isNew: true, cancellationToken);
+        if (comments != null)
+            foreach (var comment in comments)
+                Logger.LogInformation("{Comment}", comment);
+
+        if (Validator != null)
+        {
+            var errors = await Validator.ValidateAsync(entity, isNew: true, cancellationToken);
+            if (errors.Count > 0)
+                throw new ValidationException(errors);
+        }
+
         _dbSet.Add(entity);
-        await _context.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException ex)
+        {
+            Logger.LogError($"Error saving entity {entity.GetType().Name}: {ex.Message}");
+            throw;
+        }
+
+        await AfterSaveAsync(entity, isNew: true, cancellationToken);
         return entity;
     }
 
@@ -174,6 +204,18 @@ public class BaseService<TEntity, TContext> : BaseService where TEntity : BaseMo
         if (entity == null)
             throw new ArgumentNullException(nameof(entity));
 
+        var comments = await BeforeSaveAsync(entity, isNew: false, cancellationToken);
+        if (comments != null)
+            foreach (var comment in comments)
+                Logger.LogInformation("{Comment}", comment);
+
+        if (Validator != null)
+        {
+            var errors = await Validator.ValidateAsync(entity, isNew: false, cancellationToken);
+            if (errors.Count > 0)
+                throw new ValidationException(errors);
+        }
+
         // Check if entity is already being tracked
         var trackedEntity = _context.ChangeTracker.Entries<TEntity>().FirstOrDefault(e => e.Entity.Id == entity.Id);
 
@@ -189,6 +231,7 @@ public class BaseService<TEntity, TContext> : BaseService where TEntity : BaseMo
         }
 
         await _context.SaveChangesAsync(cancellationToken);
+        await AfterSaveAsync(entity, isNew: false, cancellationToken);
         return entity;
     }
 
@@ -387,16 +430,16 @@ public class BaseService<TEntity, TContext> : BaseService where TEntity : BaseMo
         return await _dbSet.CountAsync(predicate, cancellationToken);
     }
 
-    // ----- Private Filter Helper Methods
+    // ----- Filter Helper Methods
 
-    private Expression<Func<T, bool>> GetFilter<T>(ReadFilter filter)
+    protected virtual Expression<Func<T, bool>> GetFilter<T>(ReadFilter filter)
     {
         var parameter = Expression.Parameter(typeof(T));
         var filterExpression = GetFilterExpressions<T>(filter, parameter);
         return Expression.Lambda<Func<T, bool>>(filterExpression, parameter);
     }
 
-    private Expression GetFilterExpressions<T>(ReadFilter filter, ParameterExpression parameter)
+    protected virtual Expression GetFilterExpressions<T>(ReadFilter filter, ParameterExpression parameter)
     {
         if (string.IsNullOrEmpty(filter.PropertyName))
             throw new Atlas.Models.InvalidFilterCriteriaException("PropertyName is required for filter");
