@@ -101,6 +101,26 @@ public class UserContext
                         ?? this.UserEmail;
 
         this.IsMockUser = this.UserEmail == authSettings.MockUserEmail && authSettings.UseMockAuthentication;
+
+        // if tenantless authority is configured and issuer matches, set tenant to null to bypass tenant filters        
+        var header = httpContext.Request.Headers.Authorization.ToString();
+        if (header.StartsWith("bearer ", StringComparison.CurrentCultureIgnoreCase))
+        {
+            var token = header["Bearer ".Length..].Trim();
+            try
+            {
+                var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token);
+                this.Issuer = jwt.Issuer;
+                if (authSettings.TenantlessAuthority == this.Issuer)
+                {
+                    this.TenantId = null;
+                }
+            }
+            catch
+            {
+                // ignore
+            }
+        }
     }
 
     /// <summary>

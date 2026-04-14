@@ -11,6 +11,7 @@ public class AuthSettings
     public bool AutoEnableNewUsers { get; set; } = false;
     public string? InviteUrl { get; set; } = "http://localhost:8080";
     public int InviteExpirationMinutes { get; set; } = 1;
+    public string? TenantlessAuthority { get; set; }
 
     /// <summary>
     /// Used for anonymous callbacks that should link to a user
