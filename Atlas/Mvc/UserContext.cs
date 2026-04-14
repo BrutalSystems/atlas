@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Atlas.Extensions;
 using Atlas.Helpers;
+using Atlas.Services.Jobs;
 using Atlas.Settings;
 using Foundatio.Caching;
 
@@ -102,15 +103,42 @@ public class UserContext
         this.IsMockUser = this.UserEmail == authSettings.MockUserEmail && authSettings.UseMockAuthentication;
     }
 
+    /// <summary>
+    /// Creates a UserContext pre-populated from a JobContext.
+    /// Used when constructing a context for background job execution outside of an HTTP request.
+    /// </summary>
+    public UserContext(JobContext jobContext)
+    {
+        CacheClient = new InMemoryCacheClient();
+        this.TenantId = jobContext.TenantId;
+        this.AuthUserId = jobContext.AuthUserId;
+    }
+
+    /// <summary>
+    /// Stamps this UserContext with the identity captured at job enqueue time.
+    /// Called by JobQueueWorker on the scoped UserContext before dispatching to the worker,
+    /// ensuring EF tenant filters and audit fields work correctly in background execution.
+    /// </summary>
+    public void SetJobContext(JobContext jobContext)
+    {
+        this.TenantId = jobContext.TenantId;
+        this.AuthUserId = jobContext.AuthUserId;
+    }
+
+    /// <summary>
+    /// Called by IJobContextEnricher implementations to populate UserEmail and UserName
+    /// from a data store lookup after the job context has been stamped.
+    /// </summary>
+    public void SetUserDetails(string? email, string? name)
+    {
+        this.UserEmail = email;
+        this.UserName = name;
+    }
+
     public void Masquerade(AnonymousCallbackLink acl)
     {
         this.Database = acl.Database ?? this.Database;
         this.TenantId = acl.TenantId ?? this.TenantId;
         this.UserEmail = acl.UserEmail ?? this.UserEmail;
     }
-    // public static UserContext NewMockAuthData(IConfiguration? configuration = null)
-    // {
-    //     var authSettings = configuration == null ? new AuthSettings() : configuration.GetSettings<AuthSettings>();
-    //     return new UserContext(null, null, null, null, authSettings);
-    // }
 }

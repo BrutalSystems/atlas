@@ -71,7 +71,7 @@ public class RequestCleanerMiddleware(RequestDelegate next)
         {
             // ignore
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             throw;
         }

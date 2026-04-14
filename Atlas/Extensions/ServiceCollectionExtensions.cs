@@ -64,7 +64,32 @@ public static class ServiceCollectionExtensions
             }
         }
 
+        // Register all BaseValidator<T> implementations — concrete type + closed base type
+        var validatorTypes = callingAssembly.GetTypes()
+            .Where(t => t.IsClass && !t.IsAbstract && !t.IsGenericTypeDefinition)
+            .Where(t => GetBaseValidatorEntityType(t) != null);
+
+        foreach (var validatorType in validatorTypes)
+        {
+            var entityType = GetBaseValidatorEntityType(validatorType)!;
+            var closedBaseType = typeof(BaseValidator<>).MakeGenericType(entityType);
+            services.AddScoped(validatorType);
+            services.AddScoped(closedBaseType, sp => sp.GetRequiredService(validatorType));
+        }
+
         return services;
+    }
+
+    private static Type? GetBaseValidatorEntityType(Type type)
+    {
+        var t = type.BaseType;
+        while (t != null)
+        {
+            if (t.IsGenericType && t.GetGenericTypeDefinition() == typeof(BaseValidator<>))
+                return t.GetGenericArguments()[0];
+            t = t.BaseType;
+        }
+        return null;
     }
 
     private static bool IsBaseServiceDerived(Type type)

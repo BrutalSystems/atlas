@@ -6,13 +6,11 @@ namespace Atlas.Models;
 /// </summary>
 public interface IAuditable
 {
-    /// <summary>
-    /// When the entity was created.
-    /// </summary>
+    string CreatedBy { get; set; }
+    
     DateTimeOffset? CreatedAt { get; set; }
 
-    /// <summary>
-    /// When the entity was last updated.
-    /// </summary>
+    string UpdatedBy { get; set; }
+    
     DateTimeOffset? UpdatedAt { get; set; }
 }

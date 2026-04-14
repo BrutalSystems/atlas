@@ -227,8 +227,12 @@ public class BaseDbContext(DbContextOptions options, UserContext userContext) : 
                 if (entry.Entity is IAuditable auditable)
                 {
                     if (entry.State == EntityState.Added)
+                    {
                         auditable.CreatedAt = savedOn;
+                        auditable.CreatedBy = this.UserContext.UserEmail ?? "";
+                    }
                     auditable.UpdatedAt = savedOn;
+                    auditable.UpdatedBy = this.UserContext.UserEmail ?? "";
                 }
             }
 

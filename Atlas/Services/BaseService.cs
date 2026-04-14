@@ -2,11 +2,13 @@ using System.ComponentModel;
 using System.Linq.Expressions;
 using System.Reflection;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Atlas.Models;
 using Atlas.Extensions;
 using Atlas.Data;
 using Atlas.Exceptions;
 using Atlas.Helpers;
+using Atlas.Services.Jobs;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Atlas.Services;
@@ -27,7 +29,7 @@ public class BaseService<TEntity, TContext> : BaseService where TEntity : BaseMo
     protected readonly DbSet<TEntity> _dbSet;
     public virtual IQueryable<TEntity> Query => _dbSet.AsQueryable();
     protected ILogger Logger { get; private set; } = NullLogger.Instance;
-    public BaseValidator<TEntity>? Validator { get; set; }
+    public BaseValidator<TEntity>? Validator { get; }
 
     // injected by Autofac... so we can create a logger with the right type
     public ILoggerFactory? LoggerFactory
@@ -39,6 +41,50 @@ public class BaseService<TEntity, TContext> : BaseService where TEntity : BaseMo
                 this.Logger = value.CreateLogger(GetType()) ?? NullLogger.Instance;
             }
         }
+    }
+
+    /// <summary>
+    /// Injected by Autofac PropertiesAutowired. Null when no orchestrator is registered —
+    /// EnqueueJobAsync will run the job inline via ServiceProvider in that case.
+    /// </summary>
+    public IJobOrchestrator? JobOrchestrator { get; set; }
+
+    /// <summary>
+    /// Injected by Autofac PropertiesAutowired. Used to resolve IJobWorker for inline
+    /// execution when JobOrchestrator is null (e.g. CLI tools, unit tests without a queue).
+    /// </summary>
+    public IServiceProvider? ServiceProvider { get; set; }
+
+    /// <summary>
+    /// Enqueues a background job. Automatically builds a JobContext from the current
+    /// UserContext (tenant + auth user) so the worker scope runs with the correct identity.
+    /// Pass urgencyOverride = Immediate to bypass the debounce window for this call.
+    /// If no orchestrator is registered the job is executed inline via IServiceProvider.
+    /// </summary>
+    protected async Task EnqueueJobAsync(IJob job, JobUrgency? urgencyOverride = null, JobContext? jobContext = null)
+    {
+        var urgency = urgencyOverride ?? job.Urgency;
+        jobContext ??= new JobContext(
+            _context.UserContext?.TenantId,
+            _context.UserContext?.AuthUserId);
+
+        // if no JobOrchestrator was added to DI, we'll skip below and run the job directly (if it was added to DI)
+        if (JobOrchestrator != null)
+        {
+            JobOrchestrator.Enqueue(job, jobContext, urgency);
+            return;
+        }
+
+        // No orchestrator — run inline so callers still see side-effects (e.g. in tests/CLI)
+        var worker = ServiceProvider?.GetKeyedService<IJobWorker>(job.JobType);
+        if (worker != null)
+            await worker.ProcessAsync(job, CancellationToken.None);
+
+        // If we cant find a worker, just log it and move on — this allows us to enqueue jobs from contexts where DI isnt fully set up 
+        // (e.g. unit tests, CLI tools) without needing to worry about the orchestrator/worker setup
+        // in a production setting, this would be bad though
+        else
+            Logger.LogWarning("No IJobWorker found for job type {JobType}. Job was not executed.", job.JobType);
     }
 
     public BaseService(TContext context, BaseValidator<TEntity>? validator = null)
@@ -156,6 +202,8 @@ public class BaseService<TEntity, TContext> : BaseService where TEntity : BaseMo
     protected virtual Task<List<string>?> BeforeSaveAsync(TEntity entity, bool isNew, CancellationToken cancellationToken = default) => Task.FromResult<List<string>?>(null);
 
     protected virtual Task AfterSaveAsync(TEntity entity, bool isNew, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+    protected virtual Task AfterDeleteAsync(TEntity entity, CancellationToken cancellationToken = default) => Task.CompletedTask;
 
     public virtual async Task<TEntity> CreateAsync(TEntity entity, CancellationToken cancellationToken = default)
     {
@@ -345,6 +393,7 @@ public class BaseService<TEntity, TContext> : BaseService where TEntity : BaseMo
 
         _dbSet.Remove(entity);
         await _context.SaveChangesAsync(cancellationToken);
+        await AfterDeleteAsync(entity, cancellationToken);
         return true;
     }
 
