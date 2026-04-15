@@ -1,3 +1,4 @@
+using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Atlas.Extensions;
 using Atlas.Helpers;
@@ -20,6 +21,7 @@ public class UserContext
     public string? UserName { get; private set; }
     public string? TenantId { get; internal set; }
     public bool IsMockUser { get; private set; } = false;
+    public string? Issuer { get; private set; }    
     public bool IsAuthenticated { get; } = false;
     public string? ConnectionString { get; set; }
     public ICacheClient? CacheClient { get; private set; }
