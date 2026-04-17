@@ -54,8 +54,11 @@ public class BaseDbContext(DbContextOptions options, UserContext userContext) : 
     {
         // this.Logger.LogDebug("Configuring DbContext of type {DbContextType}", this.GetType().Name);
 
-        var configuration = Env.GetConfiguration();
-        DatabaseConfiguration.ConfigureOptionsBuilder(optionsBuilder, configuration, this.GetType());
+        if (!optionsBuilder.IsConfigured)
+        {
+            var configuration = Env.GetConfiguration();
+            DatabaseConfiguration.ConfigureOptionsBuilder(optionsBuilder, configuration, this.GetType());
+        }
         // Logger = Logging.CreateLogger(this.GetType().Name, configuration);
 
         base.OnConfiguring(optionsBuilder);

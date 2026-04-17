@@ -24,6 +24,7 @@ public class Env
         var fullName = entryAssem?.FullName ?? "(unknown assembly)";
         var entryVersion = entryAssem?.GetName().Version?.ToString() ?? "(unknown version)";
 
+        Console.WriteLine($"Env.cs --------------");
         Console.WriteLine($"\n*** {fullName} - {EnvironmentName}\n", fullName, entryVersion, EnvironmentName);
     }
 
