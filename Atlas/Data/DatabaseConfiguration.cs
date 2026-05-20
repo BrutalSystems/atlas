@@ -42,7 +42,8 @@ public static class DatabaseConfiguration
 
                 options.UseNpgsql(postgresConnectionString, npgsqlOptions =>
                 {
-                    // Enable retry on transient failures
+                    var migrationAssemblyName = $"{codeName}.Migrations.Postgres";
+                    npgsqlOptions.MigrationsAssembly(migrationAssemblyName);
                     npgsqlOptions.EnableRetryOnFailure(
                         maxRetryCount: 5,
                         maxRetryDelay: TimeSpan.FromSeconds(30),
