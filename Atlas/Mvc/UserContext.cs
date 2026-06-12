@@ -168,39 +168,57 @@ public class UserContext
     }
 
     /// <summary>
-    /// Resolves the real client IP by checking proxy headers before falling back to the TCP connection IP.
-    /// Priority: X-Real-IP → last entry in X-Forwarded-For → RemoteIpAddress.
-    /// X-Real-IP is preferred because nginx ingress sets it to exactly the client IP (no chain ambiguity).
-    /// The last entry in X-Forwarded-For is the one appended by the nearest trusted proxy.
+    /// Resolves the real client IP.
+    /// Priority:
+    ///   1. <see cref="ConnectionInfo.RemoteIpAddress"/> if it is a public IP — this is what
+    ///      ASP.NET's ForwardedHeadersMiddleware writes after parsing X-Forwarded-For, and is
+    ///      the most trustworthy source in production.
+    ///   2. Leftmost non-loopback IP in X-Forwarded-For (the original client, per de-facto XFF semantics)
+    ///      — used in tests / dev where ForwardedHeadersMiddleware did not run.
+    ///   3. X-Real-IP single value — last-resort fallback for upstreams that only set X-Real-IP.
+    ///   4. RemoteIpAddress as-is — e.g. loopback in unit tests.
+    /// Exposed as internal for direct testing via InternalsVisibleTo("Atlas.Tests").
     /// </summary>
-    private static System.Net.IPAddress? ResolveClientIp(HttpContext httpContext, ILogger<UserContext>? logger = null)
+    internal static System.Net.IPAddress? ResolveClientIp(HttpContext httpContext, ILogger<UserContext>? logger = null)
     {
+        var remote = httpContext.Connection.RemoteIpAddress;
+        var xff = httpContext.Request.Headers["X-Forwarded-For"].ToString();
+        var realIpHeader = httpContext.Request.Headers["X-Real-IP"].ToString();
+
+        logger?.LogDebug("ResolveClientIp — X-Real-IP: '{RealIp}', X-Forwarded-For: '{Xff}', RemoteIpAddress: '{RemoteIp}'",
+            realIpHeader, xff, remote?.ToString());
+
         System.Net.IPAddress? ip = null;
 
-        var realIpHeader = httpContext.Request.Headers["X-Real-IP"].ToString();
-        var xff = httpContext.Request.Headers["X-Forwarded-For"].ToString();
-        var remoteIp = httpContext.Connection.RemoteIpAddress?.ToString();
+        // 1. ForwardedHeadersMiddleware result (the post-middleware RemoteIpAddress) — only trust it
+        //    if it actually looks like a real client, not loopback/empty.
+        if (remote != null && !System.Net.IPAddress.IsLoopback(remote))
+            ip = remote;
 
-        logger?.LogWarning("ResolveClientIp — X-Real-IP: '{RealIp}', X-Forwarded-For: '{Xff}', RemoteIpAddress: '{RemoteIp}'",
-            realIpHeader, xff, remoteIp);
-
-        // X-Real-IP: set by nginx ingress to the direct client IP — most reliable single-value header
-        if (!string.IsNullOrWhiteSpace(realIpHeader))
-            System.Net.IPAddress.TryParse(realIpHeader.Trim(), out ip);
-
-        // X-Forwarded-For: "client, proxy1, proxy2" — last entry is from the nearest trusted proxy
+        // 2. Walk XFF left-to-right and take the first parseable, non-loopback entry.
         if (ip == null && !string.IsNullOrWhiteSpace(xff))
         {
-            var last = xff.Split(',').LastOrDefault()?.Trim();
-            if (!string.IsNullOrEmpty(last))
-                System.Net.IPAddress.TryParse(last, out ip);
+            foreach (var raw in xff.Split(','))
+            {
+                if (System.Net.IPAddress.TryParse(raw.Trim(), out var parsed) && !System.Net.IPAddress.IsLoopback(parsed))
+                {
+                    ip = parsed;
+                    break;
+                }
+            }
         }
 
-        // Fall back to direct TCP connection address
-        ip ??= httpContext.Connection.RemoteIpAddress;
+        // 3. X-Real-IP single header
+        if (ip == null && !string.IsNullOrWhiteSpace(realIpHeader)
+            && System.Net.IPAddress.TryParse(realIpHeader.Trim(), out var realIp)
+            && !System.Net.IPAddress.IsLoopback(realIp))
+            ip = realIp;
+
+        // 4. Whatever RemoteIpAddress actually is (including loopback for tests/dev)
+        ip ??= remote;
 
         var resolved = ip?.IsIPv4MappedToIPv6 == true ? ip.MapToIPv4() : ip;
-        logger?.LogWarning("ResolveClientIp — resolved: '{ResolvedIp}'", resolved);
+        logger?.LogDebug("ResolveClientIp — resolved: '{ResolvedIp}'", resolved);
 
         return resolved;
     }
