@@ -24,7 +24,6 @@ public class Env
         var fullName = entryAssem?.FullName ?? "(unknown assembly)";
         var entryVersion = entryAssem?.GetName().Version?.ToString() ?? "(unknown version)";
 
-        Console.WriteLine($"Env.cs --------------");
         Console.WriteLine($"\n*** {fullName} - {EnvironmentName}\n", fullName, entryVersion, EnvironmentName);
     }
 
@@ -40,6 +39,9 @@ public class Env
 
         var envName = Env.EnvironmentName.ToLower();
         var configurationBuilder = new ConfigurationBuilder();
+
+        Console.WriteLine(Path.GetFullPath("appsettings.Development.json"));
+
         if (File.Exists("appsettings.json"))
             configurationBuilder.AddJsonFile("appsettings.json");
 

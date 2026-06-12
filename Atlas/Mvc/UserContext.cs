@@ -5,6 +5,7 @@ using Atlas.Helpers;
 using Atlas.Services.Jobs;
 using Atlas.Settings;
 using Foundatio.Caching;
+using Microsoft.Extensions.Logging;
 
 namespace Atlas.Mvc;
 
@@ -27,7 +28,9 @@ public class UserContext
     public ICacheClient? CacheClient { get; private set; }
     public IHeaderDictionary? Headers { get; set; }
 
-    public UserContext(AuthSettings? authSettings = null, HttpContext? httpContext = null, IHttpContextAccessor? httpContextAccessor = null, ICacheClient? cacheClient = null)
+    public System.Net.IPAddress? ClientIp { get; private set; }
+
+    public UserContext(AuthSettings? authSettings = null, HttpContext? httpContext = null, IHttpContextAccessor? httpContextAccessor = null, ICacheClient? cacheClient = null, ILogger<UserContext>? logger = null)
     {
         CacheClient = cacheClient ?? new InMemoryCacheClient(); //todo:  is this ok?   useful for unit tests
         var configuration = Env.GetConfiguration();
@@ -37,6 +40,7 @@ public class UserContext
         if (httpContext != null)
         {
             this.Headers = httpContext.Request.Headers;
+            this.ClientIp = ResolveClientIp(httpContext, logger);
         }
         else if (httpContext == null)
         {
@@ -52,7 +56,6 @@ public class UserContext
         }
 
         this.Claims = httpContext.User.Claims.ToList();
-
         var tenantIdHeader = httpContext!.Request.Headers[authSettings.TenantIdClaim];
         var tenantIdString = authSettings.UseMockAuthentication ? "" : tenantIdHeader.ToString();
         if (tenantIdString.IsNullOrWhiteSpace())
@@ -162,5 +165,43 @@ public class UserContext
         this.Database = acl.Database ?? this.Database;
         this.TenantId = acl.TenantId ?? this.TenantId;
         this.UserEmail = acl.UserEmail ?? this.UserEmail;
+    }
+
+    /// <summary>
+    /// Resolves the real client IP by checking proxy headers before falling back to the TCP connection IP.
+    /// Priority: X-Real-IP → last entry in X-Forwarded-For → RemoteIpAddress.
+    /// X-Real-IP is preferred because nginx ingress sets it to exactly the client IP (no chain ambiguity).
+    /// The last entry in X-Forwarded-For is the one appended by the nearest trusted proxy.
+    /// </summary>
+    private static System.Net.IPAddress? ResolveClientIp(HttpContext httpContext, ILogger<UserContext>? logger = null)
+    {
+        System.Net.IPAddress? ip = null;
+
+        var realIpHeader = httpContext.Request.Headers["X-Real-IP"].ToString();
+        var xff = httpContext.Request.Headers["X-Forwarded-For"].ToString();
+        var remoteIp = httpContext.Connection.RemoteIpAddress?.ToString();
+
+        logger?.LogWarning("ResolveClientIp — X-Real-IP: '{RealIp}', X-Forwarded-For: '{Xff}', RemoteIpAddress: '{RemoteIp}'",
+            realIpHeader, xff, remoteIp);
+
+        // X-Real-IP: set by nginx ingress to the direct client IP — most reliable single-value header
+        if (!string.IsNullOrWhiteSpace(realIpHeader))
+            System.Net.IPAddress.TryParse(realIpHeader.Trim(), out ip);
+
+        // X-Forwarded-For: "client, proxy1, proxy2" — last entry is from the nearest trusted proxy
+        if (ip == null && !string.IsNullOrWhiteSpace(xff))
+        {
+            var last = xff.Split(',').LastOrDefault()?.Trim();
+            if (!string.IsNullOrEmpty(last))
+                System.Net.IPAddress.TryParse(last, out ip);
+        }
+
+        // Fall back to direct TCP connection address
+        ip ??= httpContext.Connection.RemoteIpAddress;
+
+        var resolved = ip?.IsIPv4MappedToIPv6 == true ? ip.MapToIPv4() : ip;
+        logger?.LogWarning("ResolveClientIp — resolved: '{ResolvedIp}'", resolved);
+
+        return resolved;
     }
 }

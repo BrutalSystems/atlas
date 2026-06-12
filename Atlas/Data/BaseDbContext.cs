@@ -33,7 +33,7 @@ public class BaseDbContext(DbContextOptions options, UserContext userContext) : 
         }
     }
 
-    protected Dictionary<Type, ValueGenerator>? KeyValueGenerators { get; } = new()
+    private Dictionary<Type, ValueGenerator>? KeyValueGenerators { get; } = new()
     {
         { typeof(string), new UlidStringIdGenerator()}
     };
