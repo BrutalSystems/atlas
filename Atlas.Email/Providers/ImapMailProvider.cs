@@ -100,12 +100,7 @@ public class ImapMailProvider : IMailProvider
                         foreach (var summary in batchMessages)
                         {
                             var mailMessage = ConvertToMailMessage(summary);
-                            mailMessage.Folders.Add(new EmailFolder
-                            {
-                                Id = folderToOpen.FullName,
-                                Name = folderToOpen.Name,
-                                ProviderFolder = folderToOpen
-                            });
+                            mailMessage.Folders.Add(new EmailFolder { Id = folderToOpen.FullName, Name = folderToOpen.Name, ProviderFolder = folderToOpen });
                             totalFetched++;
 
                             if (request.Filter != null)
@@ -345,22 +340,13 @@ public class ImapMailProvider : IMailProvider
 
             _logger.LogInformation("IMAP connection test successful for {Username}@{Server}", imapSettings.Username, imapSettings.Server);
 
-            return new ConnectionTestResult
-            {
-                Success = true,
-                Details = $"Successfully connected to {imapSettings.Server}:{imapSettings.Port}",
-            };
+            return new ConnectionTestResult { Success = true, Details = $"Successfully connected to {imapSettings.Server}:{imapSettings.Port}", };
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "IMAP connection test failed for {Username}@{Server}", imapSettings.Username, imapSettings.Server);
 
-            return new ConnectionTestResult
-            {
-                Success = false,
-                ErrorMessage = ex.Message,
-                Details = ex.ToString(),
-            };
+            return new ConnectionTestResult { Success = false, ErrorMessage = ex.Message, Details = ex.ToString(), };
         }
     }
 
@@ -442,10 +428,15 @@ public class ImapMailProvider : IMailProvider
 
     private MailMessage ConvertToMailMessage(IMessageSummary summary)
     {
-        var threadIdAsHex = summary.GMailThreadId == null ? null : summary.GMailThreadId.GetValueOrDefault().ToString("x");
+        if (summary.Envelope == null)
+        {
+            throw new InvalidOperationException("Envelope is null");
+        }
+
+        var threadIdAsHex = summary.GMailThreadId?.ToString("x");
         var gmailUrl = threadIdAsHex == null ? null : $"https://mail.google.com/mail/u/0/#inbox/{threadIdAsHex}";
 
-        var fromMailbox = summary.Envelope.From.Mailboxes.FirstOrDefault();
+        var fromMailbox = summary.Envelope?.From.Mailboxes.FirstOrDefault();
         var fromName = fromMailbox?.Name ?? string.Empty;
         var fromEmail = fromMailbox?.Address ?? string.Empty;
         var fromDomain = fromEmail.Contains('@') ? fromEmail.Split('@')[1] : string.Empty;
@@ -453,16 +444,16 @@ public class ImapMailProvider : IMailProvider
         var mailMessage = new MailMessage
         {
             MessageId = summary.UniqueId.ToString(),
-            From = summary.Envelope.From.FirstOrDefault()?.ToString() ?? string.Empty,
+            From = summary.Envelope?.From.FirstOrDefault()?.ToString() ?? string.Empty,
             FromName = fromName,
             FromEmail = fromEmail,
             FromDomain = fromDomain,
-            To = summary.Envelope.To.Select(addr => addr.ToString()).ToList(),
+            To = summary.Envelope!.To.Select(addr => addr.ToString()).ToList(),
             Subject = summary.Envelope.Subject ?? string.Empty,
             ReceivedDate = summary.Envelope.Date ?? DateTimeOffset.MinValue,
             IsRead = summary.Flags?.HasFlag(MessageFlags.Seen) ?? false,
             HasAttachments = summary.Attachments?.Any() ?? false,
-            Flags = ConvertFlags(summary.Flags, summary.Keywords != null ? new HashSet<string>(summary.Keywords) : null),
+            Flags = ConvertFlags(summary.Flags, [..summary.Keywords]),
             SourceLink = gmailUrl,
         };
 
@@ -525,31 +516,21 @@ public class ImapMailProvider : IMailProvider
 
     private async Task<IMailFolder> GetOrCreateFolderAsync(ImapClient client, string folderName, bool shouldCreate, CancellationToken cancellationToken)
     {
-        try
-        {
             var result = await this.GetFolderAsync(folderName, cancellationToken);
-            if (result == null && shouldCreate)
+            if (result != null || !shouldCreate) return result ?? throw new InvalidOperationException($"Folder {folderName} not found");
+            
+            var personalNamespace = client.PersonalNamespaces.FirstOrDefault();
+            if (personalNamespace == null) return result ?? throw new InvalidOperationException($"Folder {folderName} not found");
+                
+            var parentFolder = client.GetFolder(personalNamespace);
+            var newFolder = parentFolder;
+            foreach (var folderNamePart in folderName.Split('/'))
             {
-                var personalNamespace = client.PersonalNamespaces.FirstOrDefault();
-                if (personalNamespace != null)
-                {
-                    var parentFolder = client.GetFolder(personalNamespace);
-                    var newFolder = parentFolder;
-                    foreach (var folderNamePart in folderName.Split('/'))
-                    {
-                        newFolder = await newFolder.CreateAsync(folderNamePart, true, cancellationToken);
-                    }
-
-                    return newFolder;
-                }
+                var createdFolder = await newFolder.CreateAsync(folderNamePart, true, cancellationToken);
+                if (createdFolder == null) return result ?? throw new InvalidOperationException($"Folder {folderName} not found");
+                newFolder = createdFolder;
             }
-
-            return result ?? throw new InvalidOperationException($"Folder {folderName} not found");
-        }
-        catch
-        {
-            throw;
-        }
+            return newFolder;
     }
 
     private async Task ModifyMessageFlagsAsync(MailMessage emessage, MessageFlags flag, bool addFlag, CancellationToken cancellationToken)
@@ -589,7 +570,8 @@ public class ImapMailProvider : IMailProvider
                 allowRetry: false,
                 cancellationToken: cancellationToken);
 
-            _logger.LogDebug("Successfully modified flag {Flag} ({Action}) for message {MessageId} for {Username}@{Server}", flag, addFlag ? "add" : "remove", messageId, imapSettings.Username, imapSettings.Server);
+            _logger.LogDebug("Successfully modified flag {Flag} ({Action}) for message {MessageId} for {Username}@{Server}", flag, addFlag ? "add" : "remove", messageId, imapSettings.Username,
+                imapSettings.Server);
         }
         catch (Exception ex)
         {
@@ -634,7 +616,8 @@ public class ImapMailProvider : IMailProvider
                 allowRetry: false,
                 cancellationToken: cancellationToken);
 
-            _logger.LogDebug("Successfully modified keywords {Keywords} ({Action}) for message {MessageId} for {Username}@{Server}", string.Join(", ", keywords), addKeywords ? "add" : "remove", messageId, imapSettings.Username, imapSettings.Server);
+            _logger.LogDebug("Successfully modified keywords {Keywords} ({Action}) for message {MessageId} for {Username}@{Server}", string.Join(", ", keywords), addKeywords ? "add" : "remove",
+                messageId, imapSettings.Username, imapSettings.Server);
         }
         catch (Exception ex)
         {
