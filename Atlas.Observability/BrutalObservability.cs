@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using Atlas.Helpers;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
@@ -107,6 +108,10 @@ public static class BrutalObservability
         if (traces)
             otel.WithTracing(t =>
             {
+                // Apply the sampler in code (not just via OTEL_TRACES_SAMPLER) so the decision
+                // is guaranteed regardless of SDK env-var support. Unset -> SDK default (100%).
+                var sampler = BuildSampler();
+                if (sampler is not null) t.SetSampler(sampler);
                 if (includeAspNetCore) t.AddAspNetCoreInstrumentation();
                 t.AddHttpClientInstrumentation().AddOtlpExporter();
             });
@@ -117,6 +122,29 @@ public static class BrutalObservability
                 if (includeAspNetCore) m.AddAspNetCoreInstrumentation();
                 m.AddHttpClientInstrumentation().AddRuntimeInstrumentation().AddOtlpExporter();
             });
+    }
+
+    // Build the trace sampler from OTEL_TRACES_SAMPLER / OTEL_TRACES_SAMPLER_ARG (W3C/OTel spec
+    // names), returning null to leave the SDK default (ParentBased(AlwaysOn) = 100%). Applied in
+    // code so it works even if this SDK build doesn't read the env var itself.
+    static Sampler? BuildSampler()
+    {
+        var name = Environment.GetEnvironmentVariable("OTEL_TRACES_SAMPLER");
+        if (string.IsNullOrWhiteSpace(name)) return null;
+
+        var arg = Environment.GetEnvironmentVariable("OTEL_TRACES_SAMPLER_ARG");
+        var ratio = double.TryParse(arg, NumberStyles.Float, CultureInfo.InvariantCulture, out var r) ? r : 1.0;
+
+        return name.Trim().ToLowerInvariant() switch
+        {
+            "always_on" => new AlwaysOnSampler(),
+            "always_off" => new AlwaysOffSampler(),
+            "traceidratio" => new TraceIdRatioBasedSampler(ratio),
+            "parentbased_always_on" => new ParentBasedSampler(new AlwaysOnSampler()),
+            "parentbased_always_off" => new ParentBasedSampler(new AlwaysOffSampler()),
+            "parentbased_traceidratio" => new ParentBasedSampler(new TraceIdRatioBasedSampler(ratio)),
+            _ => null, // unknown value -> keep SDK default
+        };
     }
 
     static string ServiceName() => Environment.GetEnvironmentVariable("OTEL_SERVICE_NAME") ?? "unknown-service";
