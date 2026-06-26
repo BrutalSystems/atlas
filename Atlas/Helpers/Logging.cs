@@ -36,8 +36,22 @@ public static class Logging
     private static ILoggerFactory? _sharedLoggerFactory;
     private static bool _processExitHandlerRegistered;
 
+    /// <summary>
+    /// Opt-in hook for routing static-context loggers (everything created via this helper)
+    /// onto a different provider pipeline. Atlas.Observability sets this so static loggers
+    /// join the app's Serilog pipeline. Left null (the default), the legacy "Atlas Log
+    /// Formatter" console output is used — so apps that have not cut over are unchanged.
+    /// </summary>
+    public static Action<ILoggingBuilder>? ConfigureProviders;
+
     private static void ConfigureBuilder(ILoggingBuilder builder)
     {
+        if (ConfigureProviders is not null)
+        {
+            ConfigureProviders(builder);
+            return;
+        }
+
         builder.AddConsoleFormatter<ConsoleFormatter, Microsoft.Extensions.Logging.Console.ConsoleFormatterOptions>()
             .AddConsole(options =>
             {
