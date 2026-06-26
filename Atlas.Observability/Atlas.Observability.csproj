@@ -19,6 +19,7 @@
   <ItemGroup>
     <!-- Structured logging. Serilog.AspNetCore bundles Console + Settings.Configuration;
          the k8s JSON shape is our own HouseJsonFormatter (Serilog core JSON helpers). -->
+    <PackageReference Include="OpenTelemetry.Instrumentation.EntityFrameworkCore" Version="1.16.0-beta.1" />
     <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
 
     <!-- OpenTelemetry: traces + metrics. -->

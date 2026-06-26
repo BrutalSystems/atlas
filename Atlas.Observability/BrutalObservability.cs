@@ -112,7 +112,24 @@ public static class BrutalObservability
                 // is guaranteed regardless of SDK env-var support. Unset -> SDK default (100%).
                 var sampler = BuildSampler();
                 if (sampler is not null) t.SetSampler(sampler);
-                if (includeAspNetCore) t.AddAspNetCoreInstrumentation();
+                if (includeAspNetCore)
+                    t.AddAspNetCoreInstrumentation(o =>
+                    {
+                        // Controllers catch DB exceptions and return 500 themselves, so the
+                        // server span is never auto-marked failed. Flag 5xx as Error so failed
+                        // requests surface in trace search and error-rate views.
+                        o.EnrichWithHttpResponse = (activity, response) =>
+                        {
+                            if (response.StatusCode >= 500)
+                                activity.SetStatus(ActivityStatusCode.Error);
+                        };
+                    });
+                // DB-layer spans: EF Core command spans (with query text) plus Npgsql's native
+                // "Npgsql" source for connection/command-level detail. Without these, a query
+                // trace is just the HTTP span — we can't see overlapping or after-scope DB
+                // operations that corrupt a pooled connection (see brokenhip-be#14).
+                t.AddEntityFrameworkCoreInstrumentation();
+                t.AddSource("Npgsql");
                 t.AddHttpClientInstrumentation().AddOtlpExporter();
             });
 
