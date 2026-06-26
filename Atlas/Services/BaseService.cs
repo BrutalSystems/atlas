@@ -120,6 +120,7 @@ public class BaseService<TEntity, TContext> : BaseService where TEntity : BaseMo
         }
 
         // Apply sorting
+        var sorted = false;
         if (request?.Sorts != null)
         {
             var first = true;
@@ -137,6 +138,7 @@ public class BaseService<TEntity, TContext> : BaseService where TEntity : BaseMo
                 else if (sort.Sort == "desc" && !first)
                     query = (query as IOrderedQueryable<TEntity>)!.ThenByColumnDescending(sort.ColId, this.Context.IsSqlite());
                 first = false;
+                sorted = true;
             }
         }
 
@@ -144,6 +146,14 @@ public class BaseService<TEntity, TContext> : BaseService where TEntity : BaseMo
         {
             var total = await query.CountAsync(cancellationToken);
             var dataQuery = query;
+            // Stable pagination requires a deterministic ORDER BY. When the caller
+            // paginates (Skip/Take) without requesting a sort, fall back to the primary
+            // key — otherwise the DB may return rows in any order and pages can silently
+            // duplicate or skip records (EF RowLimitingOperationWithoutOrderByWarning).
+            if (!sorted && (request?.Skip != null || request?.Take != null))
+            {
+                dataQuery = dataQuery.OrderBy(e => e.Id);
+            }
             if (request?.Skip != null)
             {
                 dataQuery = dataQuery.Skip(request.Skip.Value);
