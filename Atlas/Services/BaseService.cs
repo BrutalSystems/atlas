@@ -168,6 +168,14 @@ public class BaseService<TEntity, TContext> : BaseService where TEntity : BaseMo
 
             return new ReadResponse<TEntity> { Data = data, LastRow = total };
         }
+        catch (OperationCanceledException)
+        {
+            // Client disconnected / request aborted — not a server error. Rethrow
+            // unwrapped so the controller can map it to 499; logging it as an error and
+            // wrapping it in InvalidOperationException (below) would both mislabel it as
+            // a 500 and defeat that mapping. See brokenhip-be#14.
+            throw;
+        }
         catch (Exception ex)
         {
             this.Logger.LogError(ex, "Error executing query: {Message}", ex.Message);
