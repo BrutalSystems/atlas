@@ -10,7 +10,6 @@ using OpenTelemetry.Trace;
 using Serilog;
 using Serilog.Core;
 using Serilog.Events;
-using Serilog.Formatting.Compact;
 
 namespace Atlas.Observability;
 
@@ -146,7 +145,7 @@ public static class BrutalObservability
             lc.WriteTo.Console(outputTemplate:
                 "[{Timestamp:HH:mm:ss} {Level:u3}] {SourceContext}{NewLine}  {Message:lj} {Properties:j}{NewLine}{Exception}");
         else
-            lc.WriteTo.Console(new CompactJsonFormatter());
+            lc.WriteTo.Console(new HouseJsonFormatter());   // house schema: { ts, level, logger, trace_id, span_id, msg }
     }
 }
 
