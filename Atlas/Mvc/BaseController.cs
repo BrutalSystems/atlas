@@ -37,6 +37,13 @@ public abstract class BaseController<TEntity, TContext>(BaseService<TEntity, TCo
         {
             return Unauthorized(new { Message = uaEx.Message });
         }
+        catch (OperationCanceledException) when (HttpContext.RequestAborted.IsCancellationRequested)
+        {
+            // Client disconnected mid-request — not a server error. Return 499 so it
+            // doesn't inflate the 5xx rate or error logs. See brokenhip-be#14.
+            Logger.LogDebug("Request canceled by client disconnect for {EntityType}", typeof(TEntity).Name);
+            return StatusCode(499);
+        }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error retrieving all {EntityType}", typeof(TEntity).Name);
@@ -65,6 +72,13 @@ public abstract class BaseController<TEntity, TContext>(BaseService<TEntity, TCo
         {
             return Unauthorized(new { Message = uaEx.Message });
         }
+        catch (OperationCanceledException) when (HttpContext.RequestAborted.IsCancellationRequested)
+        {
+            // Client disconnected mid-request — not a server error. Return 499 so it
+            // doesn't inflate the 5xx rate or error logs. See brokenhip-be#14.
+            Logger.LogDebug("Request canceled by client disconnect for {EntityType}", typeof(TEntity).Name);
+            return StatusCode(499);
+        }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error retrieving {EntityType} with ID {Id}", typeof(TEntity).Name, id);
@@ -86,6 +100,13 @@ public abstract class BaseController<TEntity, TContext>(BaseService<TEntity, TCo
         catch (UnauthorizedAccessException uaEx)
         {
             return Unauthorized(new { Message = uaEx.Message });
+        }
+        catch (OperationCanceledException) when (HttpContext.RequestAborted.IsCancellationRequested)
+        {
+            // Client disconnected mid-request — not a server error. Return 499 so it
+            // doesn't inflate the 5xx rate or error logs. See brokenhip-be#14.
+            Logger.LogDebug("Request canceled by client disconnect for {EntityType}", typeof(TEntity).Name);
+            return StatusCode(499);
         }
         catch (Exception ex)
         {
@@ -128,6 +149,13 @@ public abstract class BaseController<TEntity, TContext>(BaseService<TEntity, TCo
         catch (UnauthorizedAccessException uaEx)
         {
             return Unauthorized(new { Message = uaEx.Message });
+        }
+        catch (OperationCanceledException) when (HttpContext.RequestAborted.IsCancellationRequested)
+        {
+            // Client disconnected mid-request — not a server error. Return 499 so it
+            // doesn't inflate the 5xx rate or error logs. See brokenhip-be#14.
+            Logger.LogDebug("Request canceled by client disconnect for {EntityType}", typeof(TEntity).Name);
+            return StatusCode(499);
         }
         catch (Exception ex)
         {
@@ -183,6 +211,13 @@ public abstract class BaseController<TEntity, TContext>(BaseService<TEntity, TCo
         {
             return Unauthorized(new { Message = uaEx.Message });
         }
+        catch (OperationCanceledException) when (HttpContext.RequestAborted.IsCancellationRequested)
+        {
+            // Client disconnected mid-request — not a server error. Return 499 so it
+            // doesn't inflate the 5xx rate or error logs. See brokenhip-be#14.
+            Logger.LogDebug("Request canceled by client disconnect for {EntityType}", typeof(TEntity).Name);
+            return StatusCode(499);
+        }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error updating {EntityType} with ID {Id}", typeof(TEntity).Name, id);
@@ -210,6 +245,13 @@ public abstract class BaseController<TEntity, TContext>(BaseService<TEntity, TCo
         catch (UnauthorizedAccessException uaEx)
         {
             return Unauthorized(new { Message = uaEx.Message });
+        }
+        catch (OperationCanceledException) when (HttpContext.RequestAborted.IsCancellationRequested)
+        {
+            // Client disconnected mid-request — not a server error. Return 499 so it
+            // doesn't inflate the 5xx rate or error logs. See brokenhip-be#14.
+            Logger.LogDebug("Request canceled by client disconnect for {EntityType}", typeof(TEntity).Name);
+            return StatusCode(499);
         }
         catch (Exception ex)
         {
