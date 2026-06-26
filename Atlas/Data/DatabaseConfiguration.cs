@@ -22,6 +22,29 @@ public static class DatabaseConfiguration
         return connectionString;
     }
 
+    // Masks secret values (password/pwd) in a connection string so it is safe to log.
+    // Keeps host/database/username visible for diagnostics; never emits the password.
+    internal static string RedactConnectionString(string? connectionString)
+    {
+        if (string.IsNullOrEmpty(connectionString))
+            return "(none)";
+
+        var parts = connectionString.Split(';', StringSplitOptions.RemoveEmptyEntries);
+        for (var i = 0; i < parts.Length; i++)
+        {
+            var eq = parts[i].IndexOf('=');
+            if (eq <= 0) continue;
+            var key = parts[i][..eq].Trim();
+            if (key.Equals("Password", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("Pwd", StringComparison.OrdinalIgnoreCase))
+            {
+                parts[i] = $"{key}=***REDACTED***";
+            }
+        }
+
+        return string.Join(";", parts);
+    }
+
     public static void ConfigureOptionsBuilder(DbContextOptionsBuilder options, IConfiguration configuration, Type dbContextType)
     {
         var provider = configuration["DatabaseProvider"] ?? "SQLite";
@@ -80,8 +103,8 @@ public static class DatabaseConfiguration
                                              ?? throw new InvalidOperationException(
                                                    "MSSQLConnection string is required when using MSSQL provider");
 
-                // Log the database path for debugging
-                Console.WriteLine($"Using MSSQL database: {mssqlConnectionString}");
+                // Log the database path for debugging (password redacted).
+                Console.WriteLine($"Using MSSQL database: {RedactConnectionString(mssqlConnectionString)}");
 
                 options.UseSqlServer(mssqlConnectionString, sqlServerOptions =>
                 {
@@ -130,7 +153,8 @@ public static class DatabaseConfiguration
 
                 logger?.LogInformation("Checking for pending database migrations...");
 
-                logger?.LogInformation(context.Database.GetConnectionString());
+                logger?.LogInformation("Database connection: {ConnectionString}",
+                    RedactConnectionString(context.Database.GetConnectionString()));
 
                 var pendingMigrations = context.Database.GetPendingMigrations().ToList();
 
