@@ -85,18 +85,35 @@ public static class BrutalObservability
 
     static void AddOtel(IServiceCollection services, string serviceName, bool includeAspNetCore)
     {
-        // Only when an OTLP endpoint is configured (in-cluster). Local dev stays logs-only.
+        // Honor the standard OTel gates for Python/.NET parity. NOTE: the manual SDK
+        // (AddOpenTelemetry) does NOT read these itself — only the OTel .NET Automatic
+        // Instrumentation agent does — so we apply them explicitly here.
+        //   OTEL_SDK_DISABLED=true        -> master kill-switch (traces + metrics)
+        //   OTEL_TRACES_EXPORTER=none     -> disable traces
+        //   OTEL_METRICS_EXPORTER=none    -> disable metrics
+        // OTEL_LOGS_EXPORTER is intentionally not handled: logs ship via Serilog -> stdout
+        // (scraped by Loki/alloy), not OTLP, so there is no log exporter to toggle.
+        if (EnvIs("OTEL_SDK_DISABLED", "true")) return;
+
+        // Plus our presence gate: no endpoint configured (local dev) -> stay logs-only.
         if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT")))
             return;
 
-        services.AddOpenTelemetry()
-            .ConfigureResource(r => r.AddService(serviceName))
-            .WithTracing(t =>
+        var traces = !EnvIs("OTEL_TRACES_EXPORTER", "none");
+        var metrics = !EnvIs("OTEL_METRICS_EXPORTER", "none");
+        if (!traces && !metrics) return;
+
+        var otel = services.AddOpenTelemetry().ConfigureResource(r => r.AddService(serviceName));
+
+        if (traces)
+            otel.WithTracing(t =>
             {
                 if (includeAspNetCore) t.AddAspNetCoreInstrumentation();
                 t.AddHttpClientInstrumentation().AddOtlpExporter();
-            })
-            .WithMetrics(m =>
+            });
+
+        if (metrics)
+            otel.WithMetrics(m =>
             {
                 if (includeAspNetCore) m.AddAspNetCoreInstrumentation();
                 m.AddHttpClientInstrumentation().AddRuntimeInstrumentation().AddOtlpExporter();
@@ -104,6 +121,9 @@ public static class BrutalObservability
     }
 
     static string ServiceName() => Environment.GetEnvironmentVariable("OTEL_SERVICE_NAME") ?? "unknown-service";
+
+    static bool EnvIs(string name, string value) =>
+        string.Equals(Environment.GetEnvironmentVariable(name), value, StringComparison.OrdinalIgnoreCase);
 
     static Logger BuildLogger(IConfiguration config, string serviceName)
     {
