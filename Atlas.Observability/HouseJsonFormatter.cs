@@ -7,7 +7,7 @@ namespace Atlas.Observability;
 
 /// <summary>
 /// Emits the BrutalSystems house JSON log schema to stdout for LOG_FORMAT=json (k8s):
-///   { "ts", "level", "logger", "trace_id", "span_id", "msg" }
+///   { "timestamp", "level", "logger", "trace_id", "span_id", "message" }
 /// matching the Python services byte-for-byte on field names, so Grafana/Alloy treat both
 /// stacks identically. In particular Alloy's `loki.process` keys on a top-level `level`
 /// field (CLEF's `@l` would not match, and CLEF omits it for Information entirely).
@@ -22,7 +22,7 @@ public sealed class HouseJsonFormatter : ITextFormatter
 
     public void Format(LogEvent e, TextWriter o)
     {
-        o.Write("{\"ts\":\"");
+        o.Write("{\"timestamp\":\"");
         o.Write(e.Timestamp.ToString("O", CultureInfo.InvariantCulture));   // ISO-8601 (Alloy ignores it; Loki uses scrape time)
         o.Write("\",\"level\":\"");
         o.Write(LevelName(e.Level));
@@ -32,7 +32,7 @@ public sealed class HouseJsonFormatter : ITextFormatter
         WriteString(ScalarString(e, "trace_id") ?? "0", o);
         o.Write(",\"span_id\":");
         WriteString(ScalarString(e, "span_id") ?? "0", o);
-        o.Write(",\"msg\":");
+        o.Write(",\"message\":");
         WriteString(e.RenderMessage(CultureInfo.InvariantCulture), o);
 
         var service = ScalarString(e, "service.name");
