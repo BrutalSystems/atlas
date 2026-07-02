@@ -1,4 +1,5 @@
 using Atlas.Data;
+using Atlas.Exceptions;
 using Atlas.Helpers;
 using Atlas.Models;
 using Atlas.Services;
@@ -146,6 +147,10 @@ public abstract class BaseController<TEntity, TContext>(BaseService<TEntity, TCo
 
             return Ok(created);
         }
+        catch (ValidationException ve)
+        {
+            return BadRequest(new { errors = ve.Errors });
+        }
         catch (UnauthorizedAccessException uaEx)
         {
             return Unauthorized(new { Message = uaEx.Message });
@@ -211,6 +216,10 @@ public abstract class BaseController<TEntity, TContext>(BaseService<TEntity, TCo
         {
             return Unauthorized(new { Message = uaEx.Message });
         }
+        catch (ValidationException ve)
+        {
+            return BadRequest(new { errors = ve.Errors });
+        }
         catch (OperationCanceledException) when (HttpContext.RequestAborted.IsCancellationRequested)
         {
             // Client disconnected mid-request — not a server error. Return 499 so it
@@ -241,6 +250,10 @@ public abstract class BaseController<TEntity, TContext>(BaseService<TEntity, TCo
             }
 
             return NoContent();
+        }
+        catch (ValidationException ve)
+        {
+            return BadRequest(new { errors = ve.Errors });
         }
         catch (UnauthorizedAccessException uaEx)
         {
