@@ -9,8 +9,6 @@ using Microsoft.Extensions.Logging;
 
 namespace Atlas.Mvc;
 
-//todo:  review this and make sure its CLEAN
-
 public class UserContext
 {
     private List<System.Security.Claims.Claim>? Claims { get; set; }
@@ -185,8 +183,8 @@ public class UserContext
         var xff = httpContext.Request.Headers["X-Forwarded-For"].ToString();
         var realIpHeader = httpContext.Request.Headers["X-Real-IP"].ToString();
 
-        logger?.LogDebug("ResolveClientIp — X-Real-IP: '{RealIp}', X-Forwarded-For: '{Xff}', RemoteIpAddress: '{RemoteIp}'",
-            realIpHeader, xff, remote?.ToString());
+        // logger?.LogDebug("ResolveClientIp — X-Real-IP: '{RealIp}', X-Forwarded-For: '{Xff}', RemoteIpAddress: '{RemoteIp}'",
+            // realIpHeader, xff, remote?.ToString());
 
         System.Net.IPAddress? ip = null;
 
@@ -218,7 +216,7 @@ public class UserContext
         ip ??= remote;
 
         var resolved = ip?.IsIPv4MappedToIPv6 == true ? ip.MapToIPv4() : ip;
-        logger?.LogDebug("ResolveClientIp — resolved: '{ResolvedIp}'", resolved);
+        // logger?.LogDebug("ResolveClientIp — resolved: '{ResolvedIp}'", resolved);
 
         return resolved;
     }
