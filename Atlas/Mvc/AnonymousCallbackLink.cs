@@ -7,6 +7,7 @@ public class AnonymousCallbackLink
     public string? TenantId { get; set; }
     public string? Database { get; set; }
     public string ReturnUrl { get; set; } = string.Empty;
+    public string? UserId { get; set; }
     
     public string? RowId { get; set; }
 }
