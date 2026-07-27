@@ -419,6 +419,80 @@ public class OutlookMailProvider : IMailProvider
         }
     }
 
+    public async Task<MailFolderStats> GetFolderStatsAsync(string folderName, CancellationToken cancellationToken = default)
+    {
+        var folderId = await GetFolderIdAsync(folderName, cancellationToken);
+        if (string.IsNullOrEmpty(folderId))
+            return new MailFolderStats { FolderName = folderName };
+
+        var url = $"{GraphApiBaseUrl}/me/mailFolders/{folderId}";
+        var result = await _api.ExecuteHttpAsync(
+            provider: "microsoft",
+            operation: "Graph.MailFolders.Get",
+            limiterGroup: "get",
+            accountKey: outlookSettings.Username,
+            maxConcurrency: 2,
+            sendAsync: ct =>
+            {
+                var req = new HttpRequestMessage(HttpMethod.Get, url);
+                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", outlookSettings.AccessToken);
+                return _httpClient.SendAsync(req, ct);
+            },
+            parseAsync: async (response, ct) =>
+            {
+                using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+                return doc.RootElement.Clone();
+            },
+            ensureSuccess: true,
+            cancellationToken: cancellationToken);
+
+        return new MailFolderStats
+        {
+            FolderName = folderName,
+            TotalCount = result.TryGetProperty("totalItemCount", out var t) ? t.GetInt32() : 0,
+            UnreadCount = result.TryGetProperty("unreadItemCount", out var u) ? u.GetInt32() : 0,
+        };
+    }
+
+    public async Task<MailFolderStats> GetRecentFolderStatsAsync(string folderName, int days, CancellationToken cancellationToken = default)
+    {
+        var folderId = await GetFolderIdAsync(folderName, cancellationToken);
+        if (string.IsNullOrEmpty(folderId))
+            return new MailFolderStats { FolderName = folderName };
+
+        var since = DateTime.UtcNow.AddDays(-days).ToString("yyyy-MM-ddTHH:mm:ssZ");
+        var baseUrl = $"{GraphApiBaseUrl}/me/mailFolders/{folderId}/messages";
+        var total = await GetOutlookCountAsync($"{baseUrl}?$filter=receivedDateTime ge {since}&$count=true&$top=0", cancellationToken);
+        var unread = await GetOutlookCountAsync($"{baseUrl}?$filter=receivedDateTime ge {since} and isRead eq false&$count=true&$top=0", cancellationToken);
+        return new MailFolderStats { FolderName = folderName, TotalCount = total, UnreadCount = unread };
+    }
+
+    private async Task<int> GetOutlookCountAsync(string url, CancellationToken cancellationToken)
+    {
+        var result = await _api.ExecuteHttpAsync(
+            provider: "microsoft",
+            operation: "Graph.Messages.Count",
+            limiterGroup: "get",
+            accountKey: outlookSettings.Username,
+            maxConcurrency: 2,
+            sendAsync: ct =>
+            {
+                var req = new HttpRequestMessage(HttpMethod.Get, url);
+                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", outlookSettings.AccessToken);
+                req.Headers.Add("ConsistencyLevel", "eventual");
+                return _httpClient.SendAsync(req, ct);
+            },
+            parseAsync: async (response, ct) =>
+            {
+                using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+                return doc.RootElement.Clone();
+            },
+            ensureSuccess: true,
+            cancellationToken: cancellationToken);
+
+        return result.TryGetProperty("@odata.count", out var count) ? count.GetInt32() : 0;
+    }
+
     public async Task<MailSettings> RefreshTokenAsync(CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(outlookSettings.RefreshToken))
@@ -639,7 +713,7 @@ public class OutlookMailProvider : IMailProvider
         if (cachedFolders.Count > 0)
         {
             _logger.LogDebug("Retrieved {Count} cached folders for {Username}", cachedFolders.Count, outlookSettings.Username);
-            return cachedFolders;
+            return new Dictionary<string, string>(cachedFolders, StringComparer.OrdinalIgnoreCase);
         }
 
         var folderMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);

@@ -30,6 +30,10 @@ public interface IMailProvider
 
     Task<string> CreateFolderAsync(string folderName, CancellationToken cancellationToken = default);
 
+    Task<MailFolderStats> GetFolderStatsAsync(string folderName, CancellationToken cancellationToken = default);
+
+    Task<MailFolderStats> GetRecentFolderStatsAsync(string folderName, int days, CancellationToken cancellationToken = default);
+
     Task<MailSettings> RefreshTokenAsync(CancellationToken cancellationToken = default);
 
     Task<ConnectionTestResult> TestConnectionAsync(CancellationToken cancellationToken = default);

@@ -9,7 +9,7 @@ namespace Atlas.Email.Abstractions;
 public interface IMailAccountStore
 {
     Task<IMailAccountRecord?> GetByIdAsync(string accountId, CancellationToken ct = default);
-    Task<IMailAccountRecord?> GetByEmailAsync(string email, MailProviderType providerType, CancellationToken ct = default);
+    Task<IMailAccountRecord?> GetByEmailAsync(string email, string tenantId, MailProviderType providerType, CancellationToken ct = default);
 
     /// <summary>Create or update the account record (upsert based on Id).</summary>
     Task SaveAsync(IMailAccountRecord account, CancellationToken ct = default);

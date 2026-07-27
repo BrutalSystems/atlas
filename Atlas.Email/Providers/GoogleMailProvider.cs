@@ -302,13 +302,16 @@ public class GoogleMailProvider : IMailProvider
                     foreach (var label in labelIds.EnumerateArray())
                     {
                         var labelStr = label.GetString();
+                        if (IsSystemLabel(labelStr ?? "", true))
+                            continue;
                         if (!string.IsNullOrEmpty(labelStr) && labelStr != labelId)
                         {
                             labelsToRemove.Add(labelStr);
                         }
                     }
                 }
-
+                labelsToRemove.Add(emessage.Folders.FirstOrDefault()?.Name ?? "INBOX");
+                
                 if (labelsToRemove.Count > 0)
                 {
                     await ModifyMessageLabelsAsync(messageId, new[] { labelId }, labelsToRemove.ToArray(), cancellationToken);
@@ -535,6 +538,92 @@ public class GoogleMailProvider : IMailProvider
         }
     }
 
+    public async Task<MailFolderStats> GetFolderStatsAsync(string folderName, CancellationToken cancellationToken = default)
+    {
+        var labelId = await GetFolderIdAsync(folderName, cancellationToken);
+        if (string.IsNullOrEmpty(labelId))
+            return new MailFolderStats { FolderName = folderName };
+
+        var url = $"{GmailApiBaseUrl}/users/me/labels/{labelId}";
+        var result = await _api.ExecuteHttpAsync(
+            provider: "google",
+            operation: "Gmail.Labels.Get",
+            limiterGroup: "get",
+            accountKey: gmailSettings.Username,
+            maxConcurrency: 20,
+            sendAsync: ct =>
+            {
+                var req = new HttpRequestMessage(HttpMethod.Get, url);
+                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", gmailSettings.AccessToken);
+                return _httpClient.SendAsync(req, ct);
+            },
+            parseAsync: async (response, ct) =>
+            {
+                using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+                return doc.RootElement.Clone();
+            },
+            ensureSuccess: true,
+            cancellationToken: cancellationToken);
+
+        return new MailFolderStats
+        {
+            FolderName = folderName,
+            TotalCount = result.TryGetProperty("messagesTotal", out var t) ? t.GetInt32() : 0,
+            UnreadCount = result.TryGetProperty("messagesUnread", out var u) ? u.GetInt32() : 0,
+        };
+    }
+
+    public async Task<MailFolderStats> GetRecentFolderStatsAsync(string folderName, int days, CancellationToken cancellationToken = default)
+    {
+        var labelId = await GetFolderIdAsync(folderName, cancellationToken);
+        if (string.IsNullOrEmpty(labelId))
+            return new MailFolderStats { FolderName = folderName };
+
+        var since = DateTime.UtcNow.AddDays(-days).ToString("yyyy/MM/dd");
+        var total = await GetMessageCountAsync($"in:{labelId} after:{since}", cancellationToken);
+        var unread = await GetMessageCountAsync($"in:{labelId} is:unread after:{since}", cancellationToken);
+        return new MailFolderStats { FolderName = folderName, TotalCount = total, UnreadCount = unread };
+    }
+
+    private async Task<int> GetMessageCountAsync(string query, CancellationToken cancellationToken)
+    {
+        var count = 0;
+        string? pageToken = null;
+        do
+        {
+            var url = $"{GmailApiBaseUrl}/users/me/messages?q={HttpUtility.UrlEncode(query)}&maxResults=500";
+            if (pageToken != null) url += $"&pageToken={pageToken}";
+
+            var page = await _api.ExecuteHttpAsync(
+                provider: "google",
+                operation: "Gmail.Messages.Count",
+                limiterGroup: "list",
+                accountKey: gmailSettings.Username,
+                maxConcurrency: 2,
+                sendAsync: ct =>
+                {
+                    var req = new HttpRequestMessage(HttpMethod.Get, url);
+                    req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", gmailSettings.AccessToken);
+                    return _httpClient.SendAsync(req, ct);
+                },
+                parseAsync: async (response, ct) =>
+                {
+                    using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+                    return doc.RootElement.Clone();
+                },
+                ensureSuccess: true,
+                cancellationToken: cancellationToken);
+
+            if (page.TryGetProperty("messages", out var messages))
+                count += messages.GetArrayLength();
+
+            pageToken = page.TryGetProperty("nextPageToken", out var next) ? next.GetString() : null;
+        }
+        while (pageToken != null);
+
+        return count;
+    }
+
     public async Task<MailSettings> RefreshTokenAsync(CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(gmailSettings.RefreshToken))
@@ -757,7 +846,14 @@ public class GoogleMailProvider : IMailProvider
                                 }
                                 break;
                             case "date":
-                                if (DateTimeOffset.TryParse(value, out var parsedDate))
+                                var dateValue = value;
+                                // Strip trailing timezone name in parentheses, e.g. "+0000 (UTC)"
+                                if (dateValue != null)
+                                {
+                                    var parenIdx = dateValue.LastIndexOf('(');
+                                    if (parenIdx > 0) dateValue = dateValue[..parenIdx].TrimEnd();
+                                }
+                                if (DateTimeOffset.TryParse(dateValue, out var parsedDate))
                                 {
                                     receivedDate = parsedDate;
                                 }
@@ -955,7 +1051,7 @@ public class GoogleMailProvider : IMailProvider
         return false;
     }
 
-    private bool IsSystemLabel(string labelId)
+    private bool IsSystemLabel(string labelId, bool ignoreInbox = false)
     {
         var systemLabels = new[]
         {
@@ -963,7 +1059,7 @@ public class GoogleMailProvider : IMailProvider
             "CATEGORY_PERSONAL", "CATEGORY_SOCIAL", "CATEGORY_PROMOTIONS", "CATEGORY_UPDATES", "CATEGORY_FORUMS",
         };
 
-        return systemLabels.Contains(labelId);
+        return systemLabels.Contains(labelId.ToUpper());
     }
 
     private void ParseFromField(string fromFull, out string fromName, out string fromEmail, out string fromDomain)
@@ -1010,7 +1106,7 @@ public class GoogleMailProvider : IMailProvider
         if (cachedLabels.Count > 0)
         {
             _logger.LogDebug("Retrieved {Count} cached labels for {Username}", cachedLabels.Count, gmailSettings.Username);
-            return cachedLabels;
+            return new Dictionary<string, string>(cachedLabels, StringComparer.OrdinalIgnoreCase);
         }
 
         var url = $"{GmailApiBaseUrl}/users/me/labels";
@@ -1034,7 +1130,7 @@ public class GoogleMailProvider : IMailProvider
             ensureSuccess: true,
             cancellationToken: cancellationToken);
 
-        var labelMap = new Dictionary<string, string>();
+        var labelMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         if (content.TryGetProperty("labels", out var labels))
         {
@@ -1061,6 +1157,9 @@ public class GoogleMailProvider : IMailProvider
 
     private async Task<string> GetOrCreateLabelAsync(string labelName, CancellationToken cancellationToken)
     {
+        if (labelName.ToLower() == "important")
+            return "IMPORTANT";
+        
         return await GetFolderIdAsync(labelName, cancellationToken) ?? await CreateFolderAsync(labelName, cancellationToken);
     }
 

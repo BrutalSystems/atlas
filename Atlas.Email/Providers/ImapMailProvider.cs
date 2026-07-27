@@ -322,6 +322,61 @@ public class ImapMailProvider : IMailProvider
         }
     }
 
+    public async Task<MailFolderStats> GetFolderStatsAsync(string folderName, CancellationToken cancellationToken = default)
+    {
+        return await _imapExec.ExecuteAsync(
+            provider: "imap",
+            operation: "Imap.GetFolderStats",
+            limiterGroup: "imap",
+            accountKey: imapSettings.Username,
+            maxConcurrency: 1,
+            opAsync: async ct =>
+            {
+                var client = await GetImapClient(ct);
+                var folder = string.IsNullOrEmpty(folderName) ? client.Inbox : (await GetFolderAsync(folderName, ct) ?? client.GetFolder(folderName));
+                // StatusAsync updates folder.Count and folder.Unread in-place; no need to open the folder
+                await folder.StatusAsync(StatusItems.Count | StatusItems.Unread, ct);
+                return new MailFolderStats
+                {
+                    FolderName = folderName,
+                    TotalCount = folder.Count,
+                    UnreadCount = folder.Unread,
+                };
+            },
+            reconnectAsync: ct => this.GetImapClient(ct),
+            allowRetry: true,
+            cancellationToken: cancellationToken);
+    }
+
+    public async Task<MailFolderStats> GetRecentFolderStatsAsync(string folderName, int days, CancellationToken cancellationToken = default)
+    {
+        return await _imapExec.ExecuteAsync(
+            provider: "imap",
+            operation: "Imap.GetRecentFolderStats",
+            limiterGroup: "imap",
+            accountKey: imapSettings.Username,
+            maxConcurrency: 1,
+            opAsync: async ct =>
+            {
+                var client = await GetImapClient(ct);
+                var folder = string.IsNullOrEmpty(folderName) ? client.Inbox : (await GetFolderAsync(folderName, ct) ?? client.GetFolder(folderName));
+                await folder.OpenAsync(FolderAccess.ReadOnly, ct);
+                var since = DateTime.UtcNow.AddDays(-days);
+                var dateQuery = SearchQuery.DeliveredAfter(since);
+                var allUids = await folder.SearchAsync(dateQuery, ct);
+                var unreadUids = await folder.SearchAsync(SearchQuery.And(dateQuery, SearchQuery.Not(SearchQuery.Seen)), ct);
+                return new MailFolderStats
+                {
+                    FolderName = folderName,
+                    TotalCount = allUids.Count,
+                    UnreadCount = unreadUids.Count,
+                };
+            },
+            reconnectAsync: ct => this.GetImapClient(ct),
+            allowRetry: true,
+            cancellationToken: cancellationToken);
+    }
+
     public Task<MailSettings> RefreshTokenAsync(CancellationToken cancellationToken = default)
     {
         return Task.FromResult(imapSettings as MailSettings);

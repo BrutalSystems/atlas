@@ -86,6 +86,7 @@ public class MicrosoftOAuthController : ControllerBase
             TenantId = this._userContext.TenantId,
             AuthUserId = this._userContext.AuthUserId,
             ReturnUrl = returnUrl,
+            UserId = this._userContext.UserId,
         };
         await _cacheClient.SetAsync(cacheKey, acl, TimeSpan.FromMinutes(10));
 
@@ -263,10 +264,15 @@ public class MicrosoftOAuthController : ControllerBase
         {
             throw new ArgumentNullException(nameof(acl.UserEmail));
         }
+        
+        if (acl.TenantId == null)
+        {
+            throw new ArgumentNullException(nameof(acl.TenantId));
+        }
 
         var userEmail = acl.UserEmail;
         var accountId = acl.RowId;
-
+        
         var outlookSettings = new OutlookSettings
         {
             Username = userEmail,
@@ -275,13 +281,13 @@ public class MicrosoftOAuthController : ControllerBase
             TokenExpiration = DateTimeOffset.UtcNow.AddSeconds(tokenResponse.ExpiresIn),
             ClientId = _msSettings!.ClientId,
             ClientSecret = _msSettings!.ClientSecret,
-            TenantId = _msSettings!.TenantId
+            TenantId = _msSettings!.TenantId,
         };
 
         var encryptedSettings = outlookSettings.ToEncryptedJson();
 
         var account = accountId.IsNullOrWhiteSpace()
-            ? await _accountStore.GetByEmailAsync(userEmail, MailProviderType.OutlookApi)
+            ? await _accountStore.GetByEmailAsync(userEmail, acl.TenantId, MailProviderType.OutlookApi)
             : await _accountStore.GetByIdAsync(accountId!);
 
         if (account != null)
@@ -289,6 +295,7 @@ public class MicrosoftOAuthController : ControllerBase
             account.EncryptedSettings = encryptedSettings;
             account.ProviderType = MailProviderType.OutlookApi;
             account.Email = userEmail;
+            account.UserId = acl.UserId;
             await _accountStore.SaveAsync(account);
         }
         else
@@ -301,6 +308,7 @@ public class MicrosoftOAuthController : ControllerBase
                 EncryptedSettings = encryptedSettings,
                 IsActive = true,
                 TenantId = acl.TenantId,
+                UserId = acl.UserId
             };
 
             await _accountStore.SaveAsync(newAccount);

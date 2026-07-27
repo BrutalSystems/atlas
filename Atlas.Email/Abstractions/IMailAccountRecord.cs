@@ -15,4 +15,5 @@ public interface IMailAccountRecord
     string? EncryptedSettings { get; set; }
     bool IsActive { get; set; }
     string? Name { get; set; }
+    string? UserId { get; set; }
 }

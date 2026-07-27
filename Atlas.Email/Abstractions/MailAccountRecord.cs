@@ -15,4 +15,5 @@ public class MailAccountRecord : IMailAccountRecord
     public string? EncryptedSettings { get; set; }
     public bool IsActive { get; set; }
     public string? Name { get; set; }
+    public string? UserId { get; set; }
 }

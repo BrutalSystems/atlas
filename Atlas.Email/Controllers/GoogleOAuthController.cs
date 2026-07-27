@@ -86,6 +86,7 @@ public class GoogleOAuthController : ControllerBase
             TenantId = this._userContext.TenantId,
             AuthUserId = this._userContext.AuthUserId,
             ReturnUrl = returnUrl,
+            UserId = this._userContext.UserId,
         };
         await _cacheClient.SetAsync(cacheKey, acl, TimeSpan.FromMinutes(10));
 
@@ -280,7 +281,7 @@ public class GoogleOAuthController : ControllerBase
         var encryptedSettings = gmailSettings.ToEncryptedJson();
 
         var account = accountId.IsNullOrWhiteSpace()
-            ? await _accountStore.GetByEmailAsync(userEmail, MailProviderType.GmailApi)
+            ? await _accountStore.GetByEmailAsync(userEmail, acl.TenantId, MailProviderType.GmailApi)
             : await _accountStore.GetByIdAsync(accountId!);
 
         if (account != null)
