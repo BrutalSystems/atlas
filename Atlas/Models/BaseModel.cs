@@ -27,3 +27,14 @@ public class BaseTenantModel : BaseModel, ITenantScoped
     public string? TenantId { get; set; }
 }
 
+/// <summary>
+/// Base for entities scoped to both a tenant and a specific user.
+/// BaseDbContext automatically applies query filters for TenantId and AuthUserId,
+/// and stamps AuthUserId from UserContext on insert.
+/// </summary>
+public class BaseUserScopedModel : BaseTenantModel, IUserScoped
+{
+    [MaxLength(128)]
+    public string? UserId { get; set; }
+}
+

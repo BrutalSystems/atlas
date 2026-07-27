@@ -12,25 +12,21 @@ namespace Atlas.Mvc;
 public class UserContext
 {
     private List<System.Security.Claims.Claim>? Claims { get; set; }
-    public string? Database { get; private set; }
     public string? Audience { get; private set; }
     public string? ClientId { get; private set; }
     public string? AuthUserId { get; private set; }
+    public string? UserId { get; private set; }
     public string? UserEmail { get; private set; }
     public string? UserName { get; private set; }
     public string? TenantId { get; internal set; }
     public bool IsMockUser { get; private set; } = false;
     public string? Issuer { get; private set; }    
     public bool IsAuthenticated { get; } = false;
-    public string? ConnectionString { get; set; }
-    public ICacheClient? CacheClient { get; private set; }
     public IHeaderDictionary? Headers { get; set; }
-
     public System.Net.IPAddress? ClientIp { get; private set; }
 
     public UserContext(AuthSettings? authSettings = null, HttpContext? httpContext = null, IHttpContextAccessor? httpContextAccessor = null, ICacheClient? cacheClient = null, ILogger<UserContext>? logger = null)
     {
-        CacheClient = cacheClient ?? new InMemoryCacheClient(); //todo:  is this ok?   useful for unit tests
         var configuration = Env.GetConfiguration();
         authSettings ??= configuration.GetSettings<AuthSettings>() ?? new AuthSettings();
         httpContext ??= httpContextAccessor?.HttpContext;
@@ -44,7 +40,7 @@ public class UserContext
         {
             if (authSettings.UseMockAuthentication)
             {
-                this.AuthUserId = authSettings.MockUserId;
+                this.UserId = this.AuthUserId = authSettings.MockUserId;
                 this.UserEmail = authSettings.MockUserEmail;
                 this.UserName = authSettings.MockUserName;
                 this.TenantId = authSettings.MockTenantId;
@@ -54,6 +50,8 @@ public class UserContext
         }
 
         this.Claims = httpContext.User.Claims.ToList();
+        
+        // allow tenantId claim override in app
         var tenantIdHeader = httpContext!.Request.Headers[authSettings.TenantIdClaim];
         var tenantIdString = authSettings.UseMockAuthentication ? "" : tenantIdHeader.ToString();
         if (tenantIdString.IsNullOrWhiteSpace())
@@ -77,24 +75,17 @@ public class UserContext
                 if (anonLink != null)
                 {
                     tenantIdString = anonLink.TenantId;
-                    
                     break;
                 }
             }
         }
 
-        if (tenantIdString == "(null)" || tenantIdString == null)
-            this.TenantId = null;
-        else if (!tenantIdString.IsNullOrWhiteSpace())
-            this.TenantId = tenantIdString;
-
-        this.Database = this.Claims.FirstOrDefault(x => x.Type == authSettings.DatabaseClaim)?.Value;
+        this.TenantId = tenantIdString?.Trim() is "" or "(null)" or null ? null : tenantIdString;
+        this.UserId = (string?)this.Claims.FirstOrDefault(x => x.Type == "userId")?.Value;
         this.Audience = (string?)this.Claims.FirstOrDefault(x => x.Type == "aud")?.Value;
         this.ClientId = (string?)this.Claims.FirstOrDefault(x => x.Type == "client_id")?.Value;
-        this.AuthUserId = httpContext!.User?.Claims
-            ?.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier || c.Type == "sub")?.Value;
+        this.AuthUserId = httpContext!.User?.Claims?.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier || c.Type == "sub")?.Value;
 
-        //todo:  may want settings to indicate email claim key
         this.UserEmail = this.Claims.FirstOrDefault(x => x.Type == System.Security.Claims.ClaimTypes.Email)?.Value
                          ?? (string?)this.Claims.FirstOrDefault(x =>
                              x.Type == "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/upn")?.Value;
@@ -132,7 +123,7 @@ public class UserContext
     /// </summary>
     public UserContext(JobContext jobContext)
     {
-        CacheClient = new InMemoryCacheClient();
+        // CacheClient = new InMemoryCacheClient();
         this.TenantId = jobContext.TenantId;
         this.AuthUserId = jobContext.AuthUserId;
     }
@@ -158,9 +149,14 @@ public class UserContext
         this.UserName = name;
     }
 
+    /// <summary>
+    /// Stamps the application UserId resolved from a data store lookup (e.g. by authUserId).
+    /// Called by middleware after authentication so the value is available before any DB queries run.
+    /// </summary>
+    // public void SetUserId(string? userId) => this.UserId = userId;
+
     public void Masquerade(AnonymousCallbackLink acl)
     {
-        this.Database = acl.Database ?? this.Database;
         this.TenantId = acl.TenantId ?? this.TenantId;
         this.UserEmail = acl.UserEmail ?? this.UserEmail;
     }
@@ -177,7 +173,7 @@ public class UserContext
     ///   4. RemoteIpAddress as-is — e.g. loopback in unit tests.
     /// Exposed as internal for direct testing via InternalsVisibleTo("Atlas.Tests").
     /// </summary>
-    internal static System.Net.IPAddress? ResolveClientIp(HttpContext httpContext, ILogger<UserContext>? logger = null)
+    private static System.Net.IPAddress? ResolveClientIp(HttpContext httpContext, ILogger<UserContext>? logger = null)
     {
         var remote = httpContext.Connection.RemoteIpAddress;
         var xff = httpContext.Request.Headers["X-Forwarded-For"].ToString();

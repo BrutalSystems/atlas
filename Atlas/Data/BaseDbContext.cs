@@ -18,8 +18,10 @@ public class BaseDbContext(DbContextOptions options, UserContext userContext) : 
 {
     public static bool NullUserContextTenantIdAllowed { get; set; } = false;
     
-    protected ILogger Logger { get; set; } = NullLogger<BaseDbContext>.Instance; //todo:  would be better if 
+    protected ILogger Logger { get; set; } = NullLogger<BaseDbContext>.Instance; //todo:  would be better if
     public UserContext UserContext { get; set; } = userContext;
+
+    private ILoggerFactory? _loggerFactory;
 
     // injected by Autofac... so we can create a logger with the right type
     public ILoggerFactory? LoggerFactory
@@ -28,6 +30,7 @@ public class BaseDbContext(DbContextOptions options, UserContext userContext) : 
         {
             if (value != null)
             {
+                _loggerFactory = value;
                 this.Logger = value.CreateLogger(GetType()) ?? NullLogger.Instance;
             }
         }
@@ -59,7 +62,9 @@ public class BaseDbContext(DbContextOptions options, UserContext userContext) : 
             var configuration = Env.GetConfiguration();
             DatabaseConfiguration.ConfigureOptionsBuilder(optionsBuilder, configuration, this.GetType());
         }
-        // Logger = Logging.CreateLogger(this.GetType().Name, configuration);
+
+        if (_loggerFactory != null)
+            optionsBuilder.UseLoggerFactory(_loggerFactory);
 
         base.OnConfiguring(optionsBuilder);
     }
@@ -72,6 +77,7 @@ public class BaseDbContext(DbContextOptions options, UserContext userContext) : 
         ConfigureEntities(modelBuilder);
         ConfigureAuditProperties(modelBuilder);
         ConfigureTenantFilters(modelBuilder);
+        ConfigureUserFilters(modelBuilder);
     }
 
     protected virtual void ConfigureKeyValueGenerators(ModelBuilder modelBuilder)
@@ -159,17 +165,53 @@ public class BaseDbContext(DbContextOptions options, UserContext userContext) : 
         }
     }
 
-    private string? GetTenantId()
+    private string? GetTenantId() => this.UserContext.TenantId;
+
+    private string? GetUserId()
     {
-        return this.UserContext.TenantId;
+        return this.UserContext?.UserId;
     }
 
     private void SetTenantFilter<TEntity>(ModelBuilder modelBuilder) where TEntity : class, ITenantScoped
     {
-        // tenantId is only captured at setup time, not per-query
-        // var tenantId = this.UserContext.TenantId;
+        if (typeof(IUserScoped).IsAssignableFrom(typeof(TEntity)))
+        {
+            // Entity is both ITenantScoped and IUserScoped — a second HasQueryFilter call would
+            // replace the tenant filter, so combine both into a single filter here.
+            typeof(BaseDbContext)
+                .GetMethod(nameof(SetTenantAndUserFilter), System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                ?.MakeGenericMethod(typeof(TEntity))
+                .Invoke(this, new object[] { modelBuilder });
+            return;
+        }
         modelBuilder.Entity<TEntity>().HasQueryFilter(e =>
             (GetTenantId() == null) || e.TenantId == GetTenantId());
+    }
+
+    private void SetTenantAndUserFilter<TEntity>(ModelBuilder modelBuilder) where TEntity : class, ITenantScoped, IUserScoped
+    {   
+        modelBuilder.Entity<TEntity>().HasQueryFilter(e =>
+            (GetTenantId() == null || e.TenantId == GetTenantId()) &&
+            (GetUserId() == null || e.UserId == GetUserId()));
+    }
+
+    private void ConfigureUserFilters(ModelBuilder modelBuilder)
+    {
+        foreach (var entityType in modelBuilder.Model.GetEntityTypes())
+        {
+            if (!typeof(IUserScoped).IsAssignableFrom(entityType.ClrType)) continue;
+            if (typeof(ITenantScoped).IsAssignableFrom(entityType.ClrType)) continue; // handled in SetTenantAndUserFilter
+            typeof(BaseDbContext)
+                .GetMethod(nameof(SetUserFilter), System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                ?.MakeGenericMethod(entityType.ClrType)
+                .Invoke(this, new object[] { modelBuilder });
+        }
+    }
+
+    private void SetUserFilter<TEntity>(ModelBuilder modelBuilder) where TEntity : class, IUserScoped
+    {
+        modelBuilder.Entity<TEntity>().HasQueryFilter(e =>
+            GetUserId() == null || e.UserId == GetUserId());
     }
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
@@ -224,6 +266,11 @@ public class BaseDbContext(DbContextOptions options, UserContext userContext) : 
                     {
                         tenantScoped.TenantId = this.UserContext.TenantId!;
                     }
+                }
+
+                if (entry.Entity is IUserScoped userScoped && entry.State == EntityState.Added)
+                {
+                    userScoped.UserId = this.UserContext?.UserId;
                 }
 
                 //todo:  do we want a way for a SYSTEM user to override (maybe for an import)
