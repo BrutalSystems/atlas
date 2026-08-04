@@ -727,34 +727,40 @@ public class OutlookMailProvider : IMailProvider
 
     private async Task FetchFoldersRecursiveAsync(string? parentFolderId, string parentPath, Dictionary<string, string> folderMap, CancellationToken cancellationToken)
     {
-        var url = string.IsNullOrEmpty(parentFolderId)
-            ? $"{GraphApiBaseUrl}/me/mailFolders?$select=displayName,id"
-            : $"{GraphApiBaseUrl}/me/mailFolders/{parentFolderId}/childFolders?$select=displayName,id";
+        var baseUrl = string.IsNullOrEmpty(parentFolderId)
+            ? $"{GraphApiBaseUrl}/me/mailFolders?$select=displayName,id&$top=100"
+            : $"{GraphApiBaseUrl}/me/mailFolders/{parentFolderId}/childFolders?$select=displayName,id&$top=100";
 
-        url += "&includeHiddenFolders=true";
+        string? nextUrl = baseUrl;
 
-        var content = await _api.ExecuteHttpAsync(
-            provider: "microsoft",
-            operation: "Graph.MailFolders.List",
-            limiterGroup: "list",
-            accountKey: outlookSettings.Username,
-            maxConcurrency: 2,
-            sendAsync: ct =>
-            {
-                var request = new HttpRequestMessage(HttpMethod.Get, url);
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", outlookSettings.AccessToken);
-                return _httpClient.SendAsync(request, ct);
-            },
-            parseAsync: async (response, ct) =>
-            {
-                using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
-                return doc.RootElement.Clone();
-            },
-            ensureSuccess: true,
-            cancellationToken: cancellationToken);
-
-        if (content.TryGetProperty("value", out var foldersArray))
+        while (nextUrl != null)
         {
+            var content = await _api.ExecuteHttpAsync(
+                provider: "microsoft",
+                operation: "Graph.MailFolders.List",
+                limiterGroup: "list",
+                accountKey: outlookSettings.Username,
+                maxConcurrency: 2,
+                sendAsync: ct =>
+                {
+                    var request = new HttpRequestMessage(HttpMethod.Get, nextUrl);
+                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", outlookSettings.AccessToken);
+                    return _httpClient.SendAsync(request, ct);
+                },
+                parseAsync: async (response, ct) =>
+                {
+                    using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+                    return doc.RootElement.Clone();
+                },
+                ensureSuccess: true,
+                cancellationToken: cancellationToken);
+
+            if (!content.TryGetProperty("value", out var foldersArray))
+            {
+                _logger.LogWarning("No 'value' property found in API response for {Url}", nextUrl);
+                break;
+            }
+
             foreach (var folder in foldersArray.EnumerateArray())
             {
                 if (folder.TryGetProperty("displayName", out var name) && folder.TryGetProperty("id", out var id))
@@ -782,10 +788,8 @@ public class OutlookMailProvider : IMailProvider
                     _logger.LogWarning("Folder element missing displayName or id property");
                 }
             }
-        }
-        else
-        {
-            _logger.LogWarning("No 'value' property found in API response for {Url}", url);
+
+            nextUrl = content.TryGetProperty("@odata.nextLink", out var nextLink) ? nextLink.GetString() : null;
         }
     }
 
