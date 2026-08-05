@@ -1,6 +1,7 @@
 using System.Reflection;
 using Atlas.Helpers;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -52,6 +53,7 @@ public static class DatabaseConfiguration
         var codeName = dbContextType.Assembly.GetName().Name?.Split('.')[0];
         var startupAssembly = Assembly.GetEntryAssembly()?.GetName().Name;
         var isEfAddMigration = startupAssembly == "ef";
+        var schemaName = SchemaAttribute.GetSchemaName(dbContextType);
 
         // Console.WriteLine($"Configuring DbContextOptions for {startupAssembly} {dbContextType.Name} using provider '{provider}' with connection string name '{name}'");
 
@@ -67,6 +69,7 @@ public static class DatabaseConfiguration
                 {
                     var migrationAssemblyName = $"{codeName}.Migrations.Postgres";
                     npgsqlOptions.MigrationsAssembly(migrationAssemblyName);
+                    npgsqlOptions.MigrationsHistoryTable(HistoryRepository.DefaultTableName, schemaName);
                     npgsqlOptions.EnableRetryOnFailure(
                         maxRetryCount: 5,
                         maxRetryDelay: TimeSpan.FromSeconds(30),
@@ -110,6 +113,7 @@ public static class DatabaseConfiguration
                 {
                     var migrationAssemblyName = $"{codeName}.Migrations.SqlServer";
                     sqlServerOptions.MigrationsAssembly(migrationAssemblyName);
+                    sqlServerOptions.MigrationsHistoryTable(HistoryRepository.DefaultTableName, schemaName);
                 });
                 break;
         }

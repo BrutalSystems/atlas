@@ -73,11 +73,22 @@ public class BaseDbContext(DbContextOptions options, UserContext userContext) : 
     {
         base.OnModelCreating(modelBuilder);
 
+        ApplyDefaultSchema(modelBuilder);
         ConfigureKeyValueGenerators(modelBuilder);
         ConfigureEntities(modelBuilder);
         ConfigureAuditProperties(modelBuilder);
         ConfigureTenantFilters(modelBuilder);
         ConfigureUserFilters(modelBuilder);
+    }
+
+    protected virtual void ApplyDefaultSchema(ModelBuilder modelBuilder)
+    {
+        if (!this.Database.IsSqlite())
+        {
+            var schemaName = SchemaAttribute.GetSchemaName(GetType());
+            if (schemaName != null)
+                modelBuilder.HasDefaultSchema(schemaName);
+        }
     }
 
     protected virtual void ConfigureKeyValueGenerators(ModelBuilder modelBuilder)
