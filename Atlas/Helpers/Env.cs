@@ -40,8 +40,6 @@ public class Env
         var envName = Env.EnvironmentName.ToLower();
         var configurationBuilder = new ConfigurationBuilder();
 
-        Console.WriteLine(Path.GetFullPath("appsettings.Development.json"));
-
         if (File.Exists("appsettings.json"))
             configurationBuilder.AddJsonFile("appsettings.json");
 
