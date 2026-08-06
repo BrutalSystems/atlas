@@ -281,7 +281,7 @@ public class GoogleOAuthController : ControllerBase
         var encryptedSettings = gmailSettings.ToEncryptedJson();
 
         var account = accountId.IsNullOrWhiteSpace()
-            ? await _accountStore.GetByEmailAsync(userEmail, acl.TenantId, MailProviderType.GmailApi)
+            ? await _accountStore.GetByEmailAsync(userEmail, acl.TenantId ?? "", MailProviderType.GmailApi)
             : await _accountStore.GetByIdAsync(accountId!);
 
         if (account != null)

@@ -148,13 +148,7 @@ public class UserContext
         this.UserEmail = email;
         this.UserName = name;
     }
-
-    /// <summary>
-    /// Stamps the application UserId resolved from a data store lookup (e.g. by authUserId).
-    /// Called by middleware after authentication so the value is available before any DB queries run.
-    /// </summary>
-    // public void SetUserId(string? userId) => this.UserId = userId;
-
+    
     public void Masquerade(AnonymousCallbackLink acl)
     {
         this.TenantId = acl.TenantId ?? this.TenantId;

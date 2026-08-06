@@ -14,12 +14,12 @@ namespace Atlas.Data;
 /// <summary>
 /// Base class for DbContext implementations providing common functionality.
 /// </summary>
-public class BaseDbContext(DbContextOptions options, UserContext userContext) : DbContext(options)
+public class BaseDbContext(DbContextOptions options, UserContext? userContext) : DbContext(options)
 {
     public static bool NullUserContextTenantIdAllowed { get; set; } = false;
     
     protected ILogger Logger { get; set; } = NullLogger<BaseDbContext>.Instance; //todo:  would be better if
-    public UserContext UserContext { get; set; } = userContext;
+    public UserContext? UserContext { get; set; } = userContext;
 
     private ILoggerFactory? _loggerFactory;
 
@@ -176,7 +176,7 @@ public class BaseDbContext(DbContextOptions options, UserContext userContext) : 
         }
     }
 
-    private string? GetTenantId() => this.UserContext.TenantId;
+    private string? GetTenantId() => this.UserContext?.TenantId;
 
     private string? GetUserId()
     {
@@ -262,7 +262,7 @@ public class BaseDbContext(DbContextOptions options, UserContext userContext) : 
                 //todo: might need a way for an SYSTEM user to bypass and set a specific TENANT
                 if (entry.Entity is ITenantScoped tenantScoped)
                 {
-                    if (this.UserContext.TenantId == null)
+                    if (this.UserContext?.TenantId == null)
                     {
                         if (tenantScoped.TenantId != null)
                         {
@@ -290,10 +290,10 @@ public class BaseDbContext(DbContextOptions options, UserContext userContext) : 
                     if (entry.State == EntityState.Added)
                     {
                         auditable.CreatedAt = savedOn;
-                        auditable.CreatedBy = this.UserContext.UserEmail ?? "";
+                        auditable.CreatedBy = this.UserContext?.UserEmail ?? "";
                     }
                     auditable.UpdatedAt = savedOn;
-                    auditable.UpdatedBy = this.UserContext.UserEmail ?? "";
+                    auditable.UpdatedBy = this.UserContext?.UserEmail ?? "";
                 }
             }
 
