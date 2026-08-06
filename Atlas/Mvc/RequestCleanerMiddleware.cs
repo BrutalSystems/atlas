@@ -53,8 +53,6 @@ public class RequestCleanerMiddleware(RequestDelegate next)
 
                     if (removedProperties.Any())
                     {
-                        Console.WriteLine("Modified Request Body: " + json.ToString());
-
                         // Add custom headers to indicate modification
                         context.Response.Headers.Append("X-Request-Modified", "true");
                         context.Response.Headers.Append("X-Removed-Properties", string.Join(",", removedProperties));
