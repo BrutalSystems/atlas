@@ -10,6 +10,7 @@ public class AuthSettings
     public string[]? AuthorizedDomains { get; set; } = [];
     public bool AutoEnableNewUsers { get; set; } = false;
     public string? InviteUrl { get; set; } = "/signIn?inviteCode=";
+    public string? PasswordResetUrl { get; set; } = "/resetPassword?oobCode=";
 
     public int InviteExpirationMinutes { get; set; } = 1;
     public string? TenantlessAuthority { get; set; }
