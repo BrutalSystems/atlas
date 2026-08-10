@@ -288,6 +288,7 @@ public class GoogleOAuthController : ControllerBase
         {
             account.EncryptedSettings = encryptedSettings;
             account.ProviderType = MailProviderType.GmailApi;
+            account.UserId = acl.UserId;
             account.Email = userEmail;
             await _accountStore.SaveAsync(account);
         }
@@ -301,6 +302,7 @@ public class GoogleOAuthController : ControllerBase
                 EncryptedSettings = encryptedSettings,
                 IsActive = true,
                 TenantId = acl.TenantId,
+                UserId =  acl.UserId
             };
 
             await _accountStore.SaveAsync(newAccount);
