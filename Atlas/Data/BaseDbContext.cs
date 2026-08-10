@@ -279,9 +279,12 @@ public class BaseDbContext(DbContextOptions options, UserContext? userContext) :
                     }
                 }
 
-                if (entry.Entity is IUserScoped userScoped && entry.State == EntityState.Added)
+                if (entry.Entity is IUserScoped userScoped 
+                    // NOT sure why we'd want this for just Added --mattw
+                    // && entry.State == EntityState.Added
+                    )
                 {
-                    userScoped.UserId = this.UserContext?.UserId;
+                    userScoped.UserId = this.UserContext?.UserId ?? userScoped.UserId;
                 }
 
                 //todo:  do we want a way for a SYSTEM user to override (maybe for an import)
