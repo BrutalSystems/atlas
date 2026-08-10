@@ -46,5 +46,17 @@ public class ConsoleFormatter : Microsoft.Extensions.Logging.Console.ConsoleForm
         message = $"{loglevels[logEntry.LogLevel]}:   {cat.Substring(startSubstring)}{sep}{message}";
         message = message.Replace("\t", "    ");
         textWriter.WriteLine(message);
+
+        // The default formatter returns only the message, so an exception passed to
+        // LogError(ex, "...") was previously dropped entirely -- every stack trace in every
+        // service using this formatter was invisible. Write it out, indented like a multiline
+        // message so it stays readable next to the line above.
+        if (logEntry.Exception is not null)
+        {
+            var detail = String.Join(
+                "\n",
+                logEntry.Exception.ToString().Split('\n').Select(l => "        " + l.TrimEnd()));
+            textWriter.WriteLine(detail);
+        }
     }
 }
