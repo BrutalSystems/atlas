@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text;
 using Newtonsoft.Json.Linq;
 
@@ -5,10 +6,15 @@ namespace Atlas.Mvc;
 
 public class RequestCleanerMiddleware(RequestDelegate next)
 {
-    private static Dictionary<string, List<string>> _propertiesToRemove = new()
-    {
-        { "/api/User", new List<string> { "UserRoles", "UserTenants",  } }
-    };
+    // Concurrent because this static is written by AddTarget during MVC convention application
+    // at host startup. A single process may start several hosts at once — WebApplicationFactory
+    // does exactly that when test classes run in parallel — and concurrent writes to a plain
+    // Dictionary corrupt it ("Operations that change non-concurrent collections must have
+    // exclusive access"). Reads in InvokeAsync then race against those writes as well.
+    private static readonly ConcurrentDictionary<string, List<string>> _propertiesToRemove = new(
+    [
+        new KeyValuePair<string, List<string>>("/api/User", ["UserRoles", "UserTenants"]),
+    ]);
 
     public static void AddTarget(string path, List<string> properties)
     {
