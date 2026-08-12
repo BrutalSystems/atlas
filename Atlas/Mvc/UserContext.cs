@@ -167,7 +167,7 @@ public class UserContext
     ///   4. RemoteIpAddress as-is — e.g. loopback in unit tests.
     /// Exposed as internal for direct testing via InternalsVisibleTo("Atlas.Tests").
     /// </summary>
-    private static System.Net.IPAddress? ResolveClientIp(HttpContext httpContext, ILogger<UserContext>? logger = null)
+    internal static System.Net.IPAddress? ResolveClientIp(HttpContext httpContext, ILogger<UserContext>? logger = null)
     {
         var remote = httpContext.Connection.RemoteIpAddress;
         var xff = httpContext.Request.Headers["X-Forwarded-For"].ToString();
