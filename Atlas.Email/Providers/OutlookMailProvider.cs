@@ -38,7 +38,8 @@ public class OutlookMailProvider : IMailProvider
         {
             _logger.LogDebug("Fetching messages since {Since} until {Until} for {Username} (max: {MaxCount})", request.Since, request.Until, outlookSettings.Username, request.MaxCount);
 
-            var messages = new List<MailMessage>();
+            var messages = request.CollectMessages ? new List<MailMessage>() : null;
+            var collectedCount = 0;
             const int pageSize = 100;
             var totalFetched = 0;
             int processedMessages = 0;
@@ -128,11 +129,15 @@ public class OutlookMailProvider : IMailProvider
                     filteredMessages = pageMessages;
                 }
 
-                messages.AddRange(filteredMessages);
+                if (request.CollectMessages)
+                {
+                    messages!.AddRange(filteredMessages);
+                }
+                collectedCount += filteredMessages.Count;
 
-                _logger.LogDebug("Page fetched: {PageSize} messages, {FilteredCount} passed filter, {TotalCount} total collected (target: {MaxCount})", pageMessages.Count, filteredMessages.Count, messages.Count, request.MaxCount);
+                _logger.LogDebug("Page fetched: {PageSize} messages, {FilteredCount} passed filter, {TotalCount} total collected (target: {MaxCount})", pageMessages.Count, filteredMessages.Count, collectedCount, request.MaxCount);
 
-                if (messages.Count >= request.MaxCount)
+                if (collectedCount >= request.MaxCount)
                 {
                     _logger.LogDebug("Reached max count of {MaxCount}, stopping pagination", request.MaxCount);
                     break;
@@ -141,7 +146,13 @@ public class OutlookMailProvider : IMailProvider
                 nextLink = content.TryGetProperty("@odata.nextLink", out var nextLinkElement) ? nextLinkElement.GetString() : null;
             } while (!string.IsNullOrEmpty(nextLink));
 
-            var finalMessages = messages.Take(request.MaxCount).ToList();
+            if (!request.CollectMessages)
+            {
+                _logger.LogInformation("Successfully processed {Count} messages (from {TotalFetched} total) for {Username} without collecting (CollectMessages=false)", collectedCount, totalFetched, outlookSettings.Username);
+                return Enumerable.Empty<MailMessage>();
+            }
+
+            var finalMessages = messages!.Take(request.MaxCount).ToList();
 
             _logger.LogInformation("Successfully fetched {Count} messages (from {TotalFetched} total) for {Username}", finalMessages.Count, totalFetched, outlookSettings.Username);
 

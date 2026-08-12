@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Atlas\Atlas.csproj" />
+    <ProjectReference Include="..\Atlas.Email\Atlas.Email.csproj" />
   </ItemGroup>
 
   <ItemGroup>

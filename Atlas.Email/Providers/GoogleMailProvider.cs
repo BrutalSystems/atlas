@@ -39,7 +39,8 @@ public class GoogleMailProvider : IMailProvider
         {
             _logger.LogDebug("Fetching messages since {Since} until {Until} for {Username} (max: {MaxCount})", request.Since, request.Until, gmailSettings.Username, request.MaxCount);
 
-            var messages = new List<MailMessage>();
+            var messages = request.CollectMessages ? new List<MailMessage>() : null;
+            var collectedCount = 0;
             var sinceUnix = request.Since.ToUnixTimeSeconds();
             var query = $"after:{sinceUnix}";
 
@@ -138,11 +139,15 @@ public class GoogleMailProvider : IMailProvider
                     filteredMessages = validMessages!;
                 }
 
-                messages.AddRange(filteredMessages);
+                if (request.CollectMessages)
+                {
+                    messages!.AddRange(filteredMessages);
+                }
+                collectedCount += filteredMessages.Count;
 
-                _logger.LogDebug("Page fetched: {PageSize} messages, {FilteredCount} passed filter, {TotalCount} total collected (target: {MaxCount})", validMessages.Count, filteredMessages.Count, messages.Count, request.MaxCount);
+                _logger.LogDebug("Page fetched: {PageSize} messages, {FilteredCount} passed filter, {TotalCount} total collected (target: {MaxCount})", validMessages.Count, filteredMessages.Count, collectedCount, request.MaxCount);
 
-                if (messages.Count >= request.MaxCount)
+                if (collectedCount >= request.MaxCount)
                 {
                     _logger.LogDebug("Reached max count of {MaxCount}, stopping pagination", request.MaxCount);
                     break;
@@ -151,7 +156,13 @@ public class GoogleMailProvider : IMailProvider
                 pageToken = listContent.TryGetProperty("nextPageToken", out var token) ? token.GetString() : null;
             } while (!string.IsNullOrEmpty(pageToken));
 
-            var finalMessages = messages.OrderBy(m => m.ReceivedDate).Take(request.MaxCount).ToList();
+            if (!request.CollectMessages)
+            {
+                _logger.LogInformation("Successfully processed {Count} messages (from {TotalFetched} total) for {Username} without collecting (CollectMessages=false)", collectedCount, totalFetched, gmailSettings.Username);
+                return Enumerable.Empty<MailMessage>();
+            }
+
+            var finalMessages = messages!.OrderBy(m => m.ReceivedDate).Take(request.MaxCount).ToList();
 
             _logger.LogInformation("Successfully fetched {Count} messages (from {TotalFetched} total) for {Username}", finalMessages.Count, totalFetched, gmailSettings.Username);
 

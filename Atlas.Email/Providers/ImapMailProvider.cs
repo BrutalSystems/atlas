@@ -84,7 +84,8 @@ public class ImapMailProvider : IMailProvider
 
                 _logger.LogDebug("Found {Count} messages since {Since} for {Username}@{Server}", limitedUids.Count, request.Since, imapSettings.Username, imapSettings.Server);
 
-                var messages = new List<MailMessage>();
+                var messages = request.CollectMessages ? new List<MailMessage>() : null;
+                var collectedCount = 0;
                 var totalFetched = 0;
                 int processedMessages = 0;
                 int totalMessages = await this.FetchMessagesCountAsync(request, ct);
@@ -92,7 +93,7 @@ public class ImapMailProvider : IMailProvider
                 if (limitedUids.Count > 0)
                 {
                     var batchSize = Math.Min(50, limitedUids.Count);
-                    for (int i = 0; i < limitedUids.Count && messages.Count < request.MaxCount; i += batchSize)
+                    for (int i = 0; i < limitedUids.Count && collectedCount < request.MaxCount; i += batchSize)
                     {
                         var batch = limitedUids.Skip(i).Take(batchSize).ToList();
                         var batchMessages = await folderToOpen.FetchAsync(batch, MessageSummaryItems.All | MessageSummaryItems.GMailThreadId, ct);
@@ -103,19 +104,18 @@ public class ImapMailProvider : IMailProvider
                             mailMessage.Folders.Add(new EmailFolder { Id = folderToOpen.FullName, Name = folderToOpen.Name, ProviderFolder = folderToOpen });
                             totalFetched++;
 
-                            if (request.Filter != null)
+                            var passedFilter = request.Filter == null || await request.Filter(mailMessage, processedMessages++, totalMessages);
+
+                            if (passedFilter)
                             {
-                                if (await request.Filter(mailMessage, processedMessages++, totalMessages))
+                                collectedCount++;
+                                if (request.CollectMessages)
                                 {
-                                    messages.Add(mailMessage);
+                                    messages!.Add(mailMessage);
                                 }
                             }
-                            else
-                            {
-                                messages.Add(mailMessage);
-                            }
 
-                            if (messages.Count >= request.MaxCount)
+                            if (collectedCount >= request.MaxCount)
                             {
                                 break;
                             }
@@ -123,9 +123,9 @@ public class ImapMailProvider : IMailProvider
                     }
                 }
 
-                _logger.LogInformation("Successfully fetched {Count} messages for {Username}@{Server}", messages.Count, imapSettings.Username, imapSettings.Server);
+                _logger.LogInformation("Successfully fetched {Count} messages for {Username}@{Server}", collectedCount, imapSettings.Username, imapSettings.Server);
 
-                return messages;
+                return request.CollectMessages ? messages! : Enumerable.Empty<MailMessage>();
             },
             reconnectAsync: ct => this.GetImapClient(ct),
             allowRetry: true,
