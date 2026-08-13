@@ -57,13 +57,26 @@ public class OutlookMailProvider : IMailProvider
             string baseUrl;
             if (!string.IsNullOrEmpty(request.Folder))
             {
-                var folderId = await GetFolderIdAsync(request.Folder, cancellationToken);
-                if (folderId == null)
+                // Graph accepts a well-known folder name wherever it accepts a folder id, and that
+                // spelling is locale-independent -- GetFolderIdAsync below matches on displayName,
+                // so it would miss "Inbox" on a mailbox whose UI language is not English. Callers
+                // asking for the inbox by name are the common case, so resolve it without the
+                // lookup (and without the folder-cache round trip) entirely.
+                var wellKnown = AsWellKnownFolderName(request.Folder);
+                if (wellKnown != null)
                 {
-                    throw new InvalidOperationException($"Folder '{request.Folder}' not found");
+                    baseUrl = $"{GraphApiBaseUrl}/me/mailFolders/{wellKnown}/messages";
                 }
+                else
+                {
+                    var folderId = await GetFolderIdAsync(request.Folder, cancellationToken);
+                    if (folderId == null)
+                    {
+                        throw new InvalidOperationException($"Folder '{request.Folder}' not found");
+                    }
 
-                baseUrl = $"{GraphApiBaseUrl}/me/mailFolders/{folderId}/messages";
+                    baseUrl = $"{GraphApiBaseUrl}/me/mailFolders/{folderId}/messages";
+                }
             }
             else
             {
@@ -404,6 +417,22 @@ public class OutlookMailProvider : IMailProvider
             throw;
         }
     }
+
+    /// <summary>Graph's well-known mail folder names, which may be used in place of a folder id.
+    /// Returns the canonical lowercase spelling, or null when the name is a user folder that has
+    /// to be looked up by displayName.</summary>
+    private static string? AsWellKnownFolderName(string folderName)
+    {
+        var normalized = folderName.Trim().ToLowerInvariant();
+        return WellKnownFolderNames.Contains(normalized) ? normalized : null;
+    }
+
+    private static readonly HashSet<string> WellKnownFolderNames = new(StringComparer.Ordinal)
+    {
+        "archive", "clutter", "conflicts", "conversationhistory", "deleteditems", "drafts",
+        "inbox", "junkemail", "localfailures", "msgfolderroot", "outbox", "recoverableitemsdeletions",
+        "scheduled", "searchfolders", "sentitems", "serverfailures", "syncissues",
+    };
 
     public async Task<string?> GetFolderIdAsync(string folderName, CancellationToken cancellationToken = default)
     {

@@ -52,7 +52,10 @@ public class GoogleMailProvider : IMailProvider
                 };
                 if (systemFolders.Contains(request.Folder.ToLower()))
                 {
-                    query = $"in:{request.Folder} {query}";
+                    // Lowercased deliberately: the name was just matched against this list in
+                    // lowercase, so emitting the canonical spelling keeps the operator identical
+                    // whatever casing the caller used ("INBOX" and "inbox" must not differ).
+                    query = $"in:{request.Folder.ToLower()} {query}";
                 }
                 else
                 {

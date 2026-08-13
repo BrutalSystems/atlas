@@ -69,7 +69,14 @@ public class ImapMailProvider : IMailProvider
             {
                 var client = await this.GetImapClient(ct);
 
-                var folderToOpen = string.IsNullOrEmpty(request.Folder) ? client.Inbox : client.GetFolder(request.Folder);
+                // "INBOX" resolves to client.Inbox rather than a GetFolder lookup. RFC 3501 makes
+                // that name case-insensitive and always present, but MailKit's GetFolder does a
+                // path lookup that throws FolderNotFoundException on a server that reports the
+                // mailbox under different casing -- and callers naming the inbox explicitly should
+                // land on exactly the folder that an empty request.Folder already gives them.
+                var folderToOpen = string.IsNullOrEmpty(request.Folder) || request.Folder.Equals("INBOX", StringComparison.OrdinalIgnoreCase)
+                    ? client.Inbox
+                    : client.GetFolder(request.Folder);
                 await folderToOpen.OpenAsync(FolderAccess.ReadWrite, ct);
 
                 SearchQuery query = SearchQuery.DeliveredAfter(request.Since.DateTime);
