@@ -146,15 +146,17 @@ public class OutlookMailProvider : IMailProvider
                 nextLink = content.TryGetProperty("@odata.nextLink", out var nextLinkElement) ? nextLinkElement.GetString() : null;
             } while (!string.IsNullOrEmpty(nextLink));
 
+            // One completion message across both modes, with Collected as a structured field —
+            // see the same note in GoogleMailProvider.
             if (!request.CollectMessages)
             {
-                _logger.LogInformation("Successfully processed {Count} messages (from {TotalFetched} total) for {Username} without collecting (CollectMessages=false)", collectedCount, totalFetched, outlookSettings.Username);
+                _logger.LogInformation("Successfully fetched {Count} messages (from {TotalFetched} total) for {Username} (Collected={Collected})", collectedCount, totalFetched, outlookSettings.Username, false);
                 return Enumerable.Empty<MailMessage>();
             }
 
             var finalMessages = messages!.Take(request.MaxCount).ToList();
 
-            _logger.LogInformation("Successfully fetched {Count} messages (from {TotalFetched} total) for {Username}", finalMessages.Count, totalFetched, outlookSettings.Username);
+            _logger.LogInformation("Successfully fetched {Count} messages (from {TotalFetched} total) for {Username} (Collected={Collected})", finalMessages.Count, totalFetched, outlookSettings.Username, true);
 
             return finalMessages;
         }

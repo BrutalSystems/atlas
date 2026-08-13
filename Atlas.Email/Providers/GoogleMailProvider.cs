@@ -156,15 +156,18 @@ public class GoogleMailProvider : IMailProvider
                 pageToken = listContent.TryGetProperty("nextPageToken", out var token) ? token.GetString() : null;
             } while (!string.IsNullOrEmpty(pageToken));
 
+            // One completion message across both modes, with Collected as a structured field.
+            // A second, differently-worded line would make the same event look different per
+            // provider in log search, silently breaking any saved query that matches on text.
             if (!request.CollectMessages)
             {
-                _logger.LogInformation("Successfully processed {Count} messages (from {TotalFetched} total) for {Username} without collecting (CollectMessages=false)", collectedCount, totalFetched, gmailSettings.Username);
+                _logger.LogInformation("Successfully fetched {Count} messages (from {TotalFetched} total) for {Username} (Collected={Collected})", collectedCount, totalFetched, gmailSettings.Username, false);
                 return Enumerable.Empty<MailMessage>();
             }
 
             var finalMessages = messages!.OrderBy(m => m.ReceivedDate).Take(request.MaxCount).ToList();
 
-            _logger.LogInformation("Successfully fetched {Count} messages (from {TotalFetched} total) for {Username}", finalMessages.Count, totalFetched, gmailSettings.Username);
+            _logger.LogInformation("Successfully fetched {Count} messages (from {TotalFetched} total) for {Username} (Collected={Collected})", finalMessages.Count, totalFetched, gmailSettings.Username, true);
 
             return finalMessages;
         }

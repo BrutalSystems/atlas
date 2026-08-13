@@ -123,7 +123,7 @@ public class ImapMailProvider : IMailProvider
                     }
                 }
 
-                _logger.LogInformation("Successfully fetched {Count} messages for {Username}@{Server}", collectedCount, imapSettings.Username, imapSettings.Server);
+                _logger.LogInformation("Successfully fetched {Count} messages for {Username}@{Server} (Collected={Collected})", collectedCount, imapSettings.Username, imapSettings.Server, request.CollectMessages);
 
                 return request.CollectMessages ? messages! : Enumerable.Empty<MailMessage>();
             },
