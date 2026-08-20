@@ -1,5 +1,4 @@
 using Atlas.Helpers;
-using Foundatio.Caching;
 using MailKit;
 using MailKit.Net.Imap;
 using MailKit.Search;
@@ -18,7 +17,15 @@ namespace Atlas.Email.Providers;
 public class ImapMailProvider : IMailProvider
 {
     private readonly ILogger<ImapMailProvider> _logger = Logging.CreateLogger<ImapMailProvider>();
-    private readonly ICacheClient _cacheClient = new InMemoryCacheClient();
+    // Folder handles are bound to THIS instance's _imapClient, so this memo is deliberately
+    // per-instance and must NOT become a shared ICacheClient -- handing an IMailFolder to another
+    // connection (or another pod) yields a handle whose owning connection is gone. It previously
+    // sat in a private InMemoryCacheClient, which worked only because Foundatio stores direct
+    // references when no options are given; `CloneValues = true` would have serialized these
+    // handles and returned them detached. Cross-run folder caching, if ever wanted, must cache
+    // names/ids the way IFolderCacheService does for the Graph and Gmail providers, never the
+    // handles themselves.
+    private Dictionary<string, IMailFolder>? _folderMap;
     private readonly ImapCallExecutor _imapExec = new ImapCallExecutor(Logging.CreateLogger<ImapCallExecutor>());
     private ImapClient? _imapClient = null;
     private readonly ImapSettings imapSettings;
@@ -315,8 +322,7 @@ public class ImapMailProvider : IMailProvider
                 allowRetry: false,
                 cancellationToken: cancellationToken);
 
-            var cacheKey = $"FolderMap:{imapSettings.Username}@{imapSettings.Server}";
-            await _cacheClient.RemoveAsync(cacheKey);
+            _folderMap = null;
 
             _logger.LogInformation("Successfully created folder {FolderName} for {Username}@{Server}", folderName, imapSettings.Username, imapSettings.Server);
 
@@ -439,13 +445,10 @@ public class ImapMailProvider : IMailProvider
 
     private async Task<Dictionary<string, IMailFolder>> GetCachedFoldersAsync(CancellationToken cancellationToken)
     {
-        var cacheKey = $"FolderMap:{imapSettings.Username}@{imapSettings.Server}";
-        var cachedFolders = (await _cacheClient.GetAsync<Dictionary<string, IMailFolder>>(cacheKey)).Value;
-
-        if (cachedFolders != null)
+        if (_folderMap != null)
         {
-            _logger.LogDebug("Retrieved {Count} cached folders for {Username}@{Server}", cachedFolders.Count, imapSettings.Username, imapSettings.Server);
-            return cachedFolders;
+            _logger.LogDebug("Retrieved {Count} cached folders for {Username}@{Server}", _folderMap.Count, imapSettings.Username, imapSettings.Server);
+            return _folderMap;
         }
 
         var client = await this.GetImapClient(cancellationToken);
@@ -461,7 +464,7 @@ public class ImapMailProvider : IMailProvider
             }
         }
 
-        await _cacheClient.SetAsync(cacheKey, folderMap, TimeSpan.FromMinutes(10));
+        _folderMap = folderMap;
 
         _logger.LogDebug("Fetched and cached {Count} folders for {Username}@{Server}", folderMap.Count, imapSettings.Username, imapSettings.Server);
 
