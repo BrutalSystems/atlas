@@ -6,8 +6,6 @@ using System.Text.Json;
 using Atlas.Extensions;
 using Atlas.Mvc;
 using Atlas.Settings;
-using ByteAether.Ulid;
-using Foundatio.Caching;
 using Atlas.Email.Abstractions;
 using Atlas.Email.Models;
 using Atlas.Email.Settings;
@@ -29,7 +27,8 @@ public class GoogleOAuthController : ControllerBase
     private readonly IFolderCacheService _folderCacheService;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly UserContext _userContext;
-    private readonly ICacheClient? _cacheClient;
+    private readonly IOAuthStateStore? _stateStore;
+    private readonly OAuthFlowSettings _flowSettings;
 
     private const string AuthorizeUrl = "https://accounts.google.com/o/oauth2/v2/auth";
     private const string TokenUrl = "https://oauth2.googleapis.com/token";
@@ -43,7 +42,8 @@ public class GoogleOAuthController : ControllerBase
         IFolderCacheService folderCacheService,
         IHttpClientFactory httpClientFactory,
         UserContext userContext,
-        ICacheClient? cacheClient = null,
+        IOAuthStateStore? stateStore = null,
+        OAuthFlowSettings? flowSettings = null,
         GoogleAppSettings? googleSettings = null)
     {
         _logger = logger;
@@ -52,7 +52,8 @@ public class GoogleOAuthController : ControllerBase
         _folderCacheService = folderCacheService;
         _httpClientFactory = httpClientFactory;
         _userContext = userContext;
-        _cacheClient = cacheClient;
+        _stateStore = stateStore;
+        _flowSettings = flowSettings ?? new OAuthFlowSettings();
     }
 
     /// <summary>
@@ -63,9 +64,19 @@ public class GoogleOAuthController : ControllerBase
     [Authorize]
     public async Task<IActionResult> GetAuthorizeUrl([FromQuery] string returnUrl, [FromQuery] string? accountId = null)
     {
-        if (_cacheClient == null || _googleSettings == null)
+        if (_stateStore == null || _googleSettings == null)
         {
             return base.Problem("Server is not configured for Google OAuth.");
+        }
+
+        // Validated HERE, on an authenticated request that can reject cleanly -- not on the
+        // anonymous callback, whose only recourse is an error page. The stored value is therefore
+        // trusted at redirect time by construction.
+        if (!OAuthReturnUrlValidator.IsAllowed(returnUrl, _flowSettings.AllowedReturnOrigins))
+        {
+            _logger.LogWarning(
+                "Rejected Google OAuth authorize-url: returnUrl {ReturnUrl} is not an allowed origin", returnUrl);
+            return BadRequest("returnUrl is not an allowed origin.");
         }
 
         if (!string.IsNullOrEmpty(accountId))
@@ -89,29 +100,19 @@ public class GoogleOAuthController : ControllerBase
 
         var redirectUri = $"{Request.Scheme}://{Request.Host}/api/GoogleOAuth/callback";
 
-        var limit = 20;
-        var cacheKey = $"google-oauth-authorize-url-{Ulid.New().ToString()}";
-        while ((await _cacheClient.GetAsync<string>(cacheKey)).Value != null)
-        {
-            cacheKey = $"google-oauth-authorize-url-{Ulid.New().ToString()}";
-            if (--limit == 0)
-            {
-                return base.Problem("Could not generate unique cache key for Google OAuth authorize URL.");
-            }
-        }
+        var stateToken = OAuthStateToken.New();
 
-        var acl = new AnonymousCallbackLink()
+        await _stateStore.CreateAsync(new OAuthFlowState
         {
-            RowId = accountId,
-            TenantId = this._userContext.TenantId,
-            AuthUserId = this._userContext.AuthUserId,
+            StateToken = stateToken,
+            Provider = "google",
             ReturnUrl = returnUrl,
+            TenantId = this._userContext.TenantId,
             UserId = this._userContext.UserId,
-        };
-        await _cacheClient.SetAsync(cacheKey, acl, TimeSpan.FromMinutes(10));
-
-        var state = cacheKey;
-        var stateBase64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(state));
+            AuthUserId = this._userContext.AuthUserId,
+            RowId = accountId,
+            ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(_flowSettings.StateTtlMinutes),
+        });
 
         var authorizeUrl = $"{AuthorizeUrl}?" +
                            $"client_id={Uri.EscapeDataString(_googleSettings.ClientId)}&" +
@@ -120,7 +121,7 @@ public class GoogleOAuthController : ControllerBase
                            $"scope={Uri.EscapeDataString(RequiredScopes)}&" +
                            $"access_type=offline&" +
                            $"prompt=consent&" +
-                           $"state={Uri.EscapeDataString(stateBase64)}";
+                           $"state={Uri.EscapeDataString(stateToken)}";
 
         _logger.LogInformation("Generated Google OAuth authorize URL for user {UserId}", _userContext.AuthUserId);
 
@@ -134,50 +135,59 @@ public class GoogleOAuthController : ControllerBase
     [AllowAnonymous]
     public async Task<IActionResult> HandleCallback([FromQuery] string? code, [FromQuery] string? state, [FromQuery] string? error)
     {
-        if (_cacheClient == null)
+        if (_stateStore == null)
         {
             return base.Problem("Server is not configured for Google OAuth.");
         }
 
         if (!string.IsNullOrEmpty(error))
         {
-            _logger.LogError("OAuth error: {Error}", error);
-            return Redirect($"/accounts?error={Uri.EscapeDataString(error)}");
+            _logger.LogError("Google OAuth provider returned an error: {Error}", error);
+            return RedirectToError("provider_error");
         }
 
         if (string.IsNullOrEmpty(code) || string.IsNullOrEmpty(state))
         {
-            return BadRequest("Missing code or state parameter");
+            return RedirectToError("state_invalid");
         }
 
-        var returnUrl = string.Empty;
+        // Consumed BEFORE the exchange: single-use has to be enforced before any work is done,
+        // or a replayed state could drive repeated token exchanges. The trade is that a transient
+        // exchange failure burns the state and the user restarts -- at-most-once, deliberately.
+        //
+        // Unknown, expired, already-consumed and wrong-provider are indistinguishable on purpose,
+        // so no oracle is handed out. This also replaces the NullReferenceException the old code
+        // threw here, which surfaced to users as "?error=Object reference not set...".
+        var flow = await _stateStore.TryConsumeAsync(state, "google");
+        if (flow == null)
+        {
+            _logger.LogWarning("Google OAuth callback rejected: state invalid, expired or already used");
+            return RedirectToError("state_invalid");
+        }
+
         try
         {
-            var cacheKey = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(state));
-            var acl = (await _cacheClient.GetAsync<AnonymousCallbackLink>(cacheKey)).Value;
-            returnUrl = acl.ReturnUrl;
-
             var redirectUri = $"{Request.Scheme}://{Request.Host}/api/GoogleOAuth/callback";
             var tokenResponse = await ExchangeCodeForTokens(code, redirectUri);
 
             if (tokenResponse == null)
             {
-                return Redirect($"{returnUrl}?error=token_exchange_failed");
+                return Redirect($"{flow.ReturnUrl}?error=token_exchange_failed");
             }
 
             var userEmail = await GetUserEmail(tokenResponse.AccessToken);
-            acl.UserEmail = userEmail;
 
-            await SaveAccountWithTokens(acl, tokenResponse);
+            await SaveAccountWithTokens(flow, userEmail, tokenResponse);
 
             _logger.LogInformation("Successfully authenticated Google account for user {UserEmail}", userEmail);
 
-            return Redirect($"{returnUrl}?success=true");
+            return Redirect($"{flow.ReturnUrl}?success=true");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error handling OAuth callback");
-            return Redirect($"{returnUrl}/accounts?error={Uri.EscapeDataString(ex.Message)}");
+            // Opaque code, never ex.Message: the old version put exception text into a redirect URL.
+            _logger.LogError(ex, "Error handling Google OAuth callback");
+            return Redirect($"{flow.ReturnUrl}?error=provider_error");
         }
     }
 
@@ -236,6 +246,36 @@ public class GoogleOAuthController : ControllerBase
 
     // Private helper methods
 
+    /// <summary>
+    /// Redirect target for failures that happen BEFORE a validated ReturnUrl is available.
+    ///
+    /// It MUST return the user to the host they are actually on. sift serves two hosts, and
+    /// OAuthCallbackPage.tsx relays the result with postMessage(..., window.location.origin)
+    /// while useOAuthPopup.ts drops any message whose origin differs from the opener's. Redirect
+    /// a springthroughlabs user to the brutalsystems host and the error message is silently
+    /// discarded -- the popup just closes and the user sees "popup_closed" instead of the real
+    /// reason.
+    ///
+    /// Request.Host is caller-influenceable, so it is only used after it matches the allowlist;
+    /// validating it is what makes it safe to use here.
+    /// </summary>
+    private IActionResult RedirectToError(string code)
+    {
+        var requestOrigin = $"{Request.Scheme}://{Request.Host}";
+
+        var origin = OAuthReturnUrlValidator.IsAllowed(requestOrigin, _flowSettings.AllowedReturnOrigins)
+            ? requestOrigin
+            : _flowSettings.AllowedReturnOrigins.FirstOrDefault();
+
+        if (string.IsNullOrWhiteSpace(origin))
+        {
+            return base.Problem("OAuth is not configured.");
+        }
+
+        return Redirect($"{origin.TrimEnd('/')}/sift/oauth-callback?error={Uri.EscapeDataString(code)}");
+    }
+
+
     private async Task<TokenResponse?> ExchangeCodeForTokens(string code, string redirectUri)
     {
         var client = _httpClientFactory.CreateClient();
@@ -286,15 +326,9 @@ public class GoogleOAuthController : ControllerBase
                ?? throw new Exception("Could not retrieve user email");
     }
 
-    private async Task SaveAccountWithTokens(AnonymousCallbackLink acl, TokenResponse tokenResponse)
+    private async Task SaveAccountWithTokens(OAuthFlowState flow, string userEmail, TokenResponse tokenResponse)
     {
-        if (acl.UserEmail == null)
-        {
-            throw new ArgumentNullException(nameof(acl.UserEmail));
-        }
-
-        var userEmail = acl.UserEmail;
-        var accountId = acl.RowId;
+        var accountId = flow.RowId;
 
         var gmailSettings = new GmailApiSettings
         {
@@ -309,14 +343,14 @@ public class GoogleOAuthController : ControllerBase
         var encryptedSettings = gmailSettings.ToEncryptedJson();
 
         var account = accountId.IsNullOrWhiteSpace()
-            ? await _accountStore.GetByEmailAsync(userEmail, acl.TenantId ?? "", MailProviderType.GmailApi)
+            ? await _accountStore.GetByEmailAsync(userEmail, flow.TenantId ?? "", MailProviderType.GmailApi)
             : await _accountStore.GetByIdAsync(accountId!);
 
         if (account != null)
         {
             account.EncryptedSettings = encryptedSettings;
             account.ProviderType = MailProviderType.GmailApi;
-            account.UserId = acl.UserId;
+            account.UserId = flow.UserId;
             account.Email = userEmail;
             await _accountStore.SaveAsync(account);
         }
@@ -329,8 +363,8 @@ public class GoogleOAuthController : ControllerBase
                 ProviderType = MailProviderType.GmailApi,
                 EncryptedSettings = encryptedSettings,
                 IsActive = true,
-                TenantId = acl.TenantId,
-                UserId =  acl.UserId
+                TenantId = flow.TenantId,
+                UserId =  flow.UserId
             };
 
             await _accountStore.SaveAsync(newAccount);
