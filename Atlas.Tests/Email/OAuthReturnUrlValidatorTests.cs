@@ -89,3 +89,45 @@ public class OAuthReturnUrlValidatorTests
             ["https://sift.brutalsystems.com/"]));
     }
 }
+
+/// <summary>
+/// AllowedReturnOrigins is a single delimited string rather than an array because .NET
+/// configuration merges arrays by index -- a localhost default in appsettings.json would survive
+/// a production configmap that set fewer entries.
+/// </summary>
+public class OAuthFlowSettingsTests
+{
+    [Fact]
+    public void Splits_and_trims_a_delimited_list()
+    {
+        var settings = new Atlas.Email.Settings.OAuthFlowSettings
+        {
+            AllowedReturnOrigins = "https://a.example.com, https://b.example.com ",
+        };
+
+        Assert.Equal(["https://a.example.com", "https://b.example.com"], settings.ParsedReturnOrigins);
+    }
+
+    [Fact]
+    public void Yields_nothing_when_unset_so_every_returnUrl_is_rejected()
+    {
+        Assert.Empty(new Atlas.Email.Settings.OAuthFlowSettings().ParsedReturnOrigins);
+    }
+
+    [Fact]
+    public void Ignores_empty_entries_from_a_trailing_delimiter()
+    {
+        var settings = new Atlas.Email.Settings.OAuthFlowSettings
+        {
+            AllowedReturnOrigins = "https://a.example.com,,",
+        };
+
+        Assert.Single(settings.ParsedReturnOrigins);
+    }
+
+    [Fact]
+    public void Defaults_the_ttl_to_ten_minutes()
+    {
+        Assert.Equal(10, new Atlas.Email.Settings.OAuthFlowSettings().StateTtlMinutes);
+    }
+}

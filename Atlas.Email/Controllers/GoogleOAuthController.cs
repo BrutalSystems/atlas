@@ -72,7 +72,7 @@ public class GoogleOAuthController : ControllerBase
         // Validated HERE, on an authenticated request that can reject cleanly -- not on the
         // anonymous callback, whose only recourse is an error page. The stored value is therefore
         // trusted at redirect time by construction.
-        if (!OAuthReturnUrlValidator.IsAllowed(returnUrl, _flowSettings.AllowedReturnOrigins))
+        if (!OAuthReturnUrlValidator.IsAllowed(returnUrl, _flowSettings.ParsedReturnOrigins))
         {
             _logger.LogWarning(
                 "Rejected Google OAuth authorize-url: returnUrl {ReturnUrl} is not an allowed origin", returnUrl);
@@ -263,9 +263,9 @@ public class GoogleOAuthController : ControllerBase
     {
         var requestOrigin = $"{Request.Scheme}://{Request.Host}";
 
-        var origin = OAuthReturnUrlValidator.IsAllowed(requestOrigin, _flowSettings.AllowedReturnOrigins)
+        var origin = OAuthReturnUrlValidator.IsAllowed(requestOrigin, _flowSettings.ParsedReturnOrigins)
             ? requestOrigin
-            : _flowSettings.AllowedReturnOrigins.FirstOrDefault();
+            : _flowSettings.ParsedReturnOrigins.FirstOrDefault();
 
         if (string.IsNullOrWhiteSpace(origin))
         {
