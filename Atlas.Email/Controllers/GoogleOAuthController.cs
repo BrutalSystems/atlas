@@ -12,6 +12,7 @@ using Atlas.Email.Abstractions;
 using Atlas.Email.Models;
 using Atlas.Email.Settings;
 using Atlas.Email.Providers;
+using Atlas.Email.Security;
 
 namespace Atlas.Email.Controllers;
 
@@ -65,6 +66,25 @@ public class GoogleOAuthController : ControllerBase
         if (_cacheClient == null || _googleSettings == null)
         {
             return base.Problem("Server is not configured for Google OAuth.");
+        }
+
+        if (!string.IsNullOrEmpty(accountId))
+        {
+            // sift#5: accountId is caller-supplied and this flow later overwrites that account's
+            // stored credentials. Verify ownership HERE, while the request is still authenticated
+            // -- the callback that performs the write is [AllowAnonymous], where
+            // UserContext.TenantId is null and both the tenant query filter and the permission
+            // check degrade to allow-all. NotFound rather than Forbid, deliberately: account ids
+            // are ULIDs and ULIDs are guessable within a millisecond, so "exists but is not yours"
+            // must not be distinguishable from "does not exist".
+            var existing = await _accountStore.GetByIdAsync(accountId);
+            if (!MailAccountOwnership.IsOwnedBy(existing, _userContext.TenantId, _userContext.UserId))
+            {
+                _logger.LogWarning(
+                    "Rejected Google OAuth authorize-url for accountId {AccountId}: not owned by tenant {TenantId} user {UserId}",
+                    accountId, _userContext.TenantId, _userContext.UserId);
+                return NotFound();
+            }
         }
 
         var redirectUri = $"{Request.Scheme}://{Request.Host}/api/GoogleOAuth/callback";
@@ -176,9 +196,17 @@ public class GoogleOAuthController : ControllerBase
         try
         {
             var account = await _accountStore.GetByIdAsync(request.AccountId);
-            if (account == null)
+
+            // sift#5: same caller-supplied id, same credential overwrite below. This endpoint is
+            // [Authorize], so today it is protected only incidentally by the tenant query filter --
+            // which fails open whenever UserContext.UserId is null (Brokenhip unable to resolve the
+            // user). One response for both "missing" and "not yours", so neither is an oracle.
+            if (!MailAccountOwnership.IsOwnedBy(account, _userContext.TenantId, _userContext.UserId))
             {
-                return NotFound("Account not found");
+                _logger.LogWarning(
+                    "Rejected Google OAuth refresh-token for accountId {AccountId}: not owned by tenant {TenantId} user {UserId}",
+                    request.AccountId, _userContext.TenantId, _userContext.UserId);
+                return NotFound();
             }
 
             var settings = MailSettings.FromEncryptedJson(account.EncryptedSettings!);

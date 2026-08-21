@@ -20,4 +20,8 @@
     <PackageReference Include="MailKit" Version="4.17.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Atlas.Tests" />
+  </ItemGroup>
+
 </Project>
