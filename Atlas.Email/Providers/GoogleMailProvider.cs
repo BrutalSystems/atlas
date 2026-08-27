@@ -597,18 +597,23 @@ public class GoogleMailProvider : IMailProvider
             return new MailFolderStats { FolderName = folderName };
 
         var since = RecentWindow.Since(days, timeZoneId).ToUnixTimeSeconds();
-        var total = await GetMessageCountAsync($"in:{labelId} after:{since}", cancellationToken);
-        var unread = await GetMessageCountAsync($"in:{labelId} is:unread after:{since}", cancellationToken);
+        var total = await GetMessageCountAsync($"after:{since}", labelId, cancellationToken);
+        var unread = await GetMessageCountAsync($"is:unread after:{since}", labelId, cancellationToken);
         return new MailFolderStats { FolderName = folderName, TotalCount = total, UnreadCount = unread };
     }
 
-    private async Task<int> GetMessageCountAsync(string query, CancellationToken cancellationToken)
+    // labelId is passed as the dedicated labelIds= list parameter, not folded into `query` as
+    // "in:{labelId}" -- the in:/label: search operators expect a label *name* (or a recognized
+    // system keyword like INBOX/UNREAD, which is why this worked for system folders only), and
+    // silently match nothing against a custom label's opaque id (e.g. "Label_123456789").
+    private async Task<int> GetMessageCountAsync(string query, string? labelId, CancellationToken cancellationToken)
     {
         var count = 0;
         string? pageToken = null;
         do
         {
             var url = $"{GmailApiBaseUrl}/users/me/messages?q={HttpUtility.UrlEncode(query)}&maxResults=500";
+            if (!string.IsNullOrEmpty(labelId)) url += $"&labelIds={HttpUtility.UrlEncode(labelId)}";
             if (pageToken != null) url += $"&pageToken={pageToken}";
 
             var page = await _api.ExecuteHttpAsync(
