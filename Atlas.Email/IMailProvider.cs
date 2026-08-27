@@ -32,7 +32,7 @@ public interface IMailProvider
 
     Task<MailFolderStats> GetFolderStatsAsync(string folderName, CancellationToken cancellationToken = default);
 
-    Task<MailFolderStats> GetRecentFolderStatsAsync(string folderName, int days, CancellationToken cancellationToken = default);
+    Task<MailFolderStats> GetRecentFolderStatsAsync(string folderName, int days, string? timeZoneId = null, CancellationToken cancellationToken = default);
 
     Task<MailSettings> RefreshTokenAsync(CancellationToken cancellationToken = default);
 

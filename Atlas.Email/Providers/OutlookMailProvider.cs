@@ -496,13 +496,13 @@ public class OutlookMailProvider : IMailProvider
         };
     }
 
-    public async Task<MailFolderStats> GetRecentFolderStatsAsync(string folderName, int days, CancellationToken cancellationToken = default)
+    public async Task<MailFolderStats> GetRecentFolderStatsAsync(string folderName, int days, string? timeZoneId = null, CancellationToken cancellationToken = default)
     {
         var folderId = await GetFolderIdAsync(folderName, cancellationToken);
         if (string.IsNullOrEmpty(folderId))
             return new MailFolderStats { FolderName = folderName };
 
-        var since = DateTime.UtcNow.AddDays(-days).ToString("yyyy-MM-ddTHH:mm:ssZ");
+        var since = RecentWindow.Since(days, timeZoneId).ToString("yyyy-MM-ddTHH:mm:ssZ");
         var baseUrl = $"{GraphApiBaseUrl}/me/mailFolders/{folderId}/messages";
         var total = await GetOutlookCountAsync($"{baseUrl}?$filter=receivedDateTime ge {since}&$count=true&$top=0", cancellationToken);
         var unread = await GetOutlookCountAsync($"{baseUrl}?$filter=receivedDateTime ge {since} and isRead eq false&$count=true&$top=0", cancellationToken);

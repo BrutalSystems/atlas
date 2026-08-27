@@ -590,13 +590,13 @@ public class GoogleMailProvider : IMailProvider
         };
     }
 
-    public async Task<MailFolderStats> GetRecentFolderStatsAsync(string folderName, int days, CancellationToken cancellationToken = default)
-    {
+    public async Task<MailFolderStats> GetRecentFolderStatsAsync(string folderName, int days, string? timeZoneId = null, CancellationToken cancellationToken = default)
+     {
         var labelId = await GetFolderIdAsync(folderName, cancellationToken);
         if (string.IsNullOrEmpty(labelId))
             return new MailFolderStats { FolderName = folderName };
 
-        var since = DateTime.UtcNow.AddDays(-days).ToString("yyyy/MM/dd");
+        var since = RecentWindow.Since(days, timeZoneId).ToUnixTimeSeconds();
         var total = await GetMessageCountAsync($"in:{labelId} after:{since}", cancellationToken);
         var unread = await GetMessageCountAsync($"in:{labelId} is:unread after:{since}", cancellationToken);
         return new MailFolderStats { FolderName = folderName, TotalCount = total, UnreadCount = unread };

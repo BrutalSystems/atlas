@@ -361,7 +361,7 @@ public class ImapMailProvider : IMailProvider
             cancellationToken: cancellationToken);
     }
 
-    public async Task<MailFolderStats> GetRecentFolderStatsAsync(string folderName, int days, CancellationToken cancellationToken = default)
+    public async Task<MailFolderStats> GetRecentFolderStatsAsync(string folderName, int days, string? timeZoneId = null, CancellationToken cancellationToken = default)
     {
         return await _imapExec.ExecuteAsync(
             provider: "imap",
@@ -374,7 +374,7 @@ public class ImapMailProvider : IMailProvider
                 var client = await GetImapClient(ct);
                 var folder = string.IsNullOrEmpty(folderName) ? client.Inbox : (await GetFolderAsync(folderName, ct) ?? client.GetFolder(folderName));
                 await folder.OpenAsync(FolderAccess.ReadOnly, ct);
-                var since = DateTime.UtcNow.AddDays(-days);
+                var since = RecentWindow.Since(days, timeZoneId).UtcDateTime;
                 var dateQuery = SearchQuery.DeliveredAfter(since);
                 var allUids = await folder.SearchAsync(dateQuery, ct);
                 var unreadUids = await folder.SearchAsync(SearchQuery.And(dateQuery, SearchQuery.Not(SearchQuery.Seen)), ct);
