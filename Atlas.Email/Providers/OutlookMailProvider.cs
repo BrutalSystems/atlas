@@ -72,7 +72,11 @@ public class OutlookMailProvider : IMailProvider
                     var folderId = await GetFolderIdAsync(request.Folder, cancellationToken);
                     if (folderId == null)
                     {
-                        throw new InvalidOperationException($"Folder '{request.Folder}' not found");
+                        // Matches GetFolderStatsAsync/GetRecentFolderStatsAsync: a folder that
+                        // doesn't exist in this mailbox (e.g. a stat-folder config referencing a
+                        // folder this account never created) yields zero results, not a fault.
+                        _logger.LogDebug("Folder '{Folder}' not found for {Username}, returning no messages", request.Folder, outlookSettings.Username);
+                        return Enumerable.Empty<MailMessage>();
                     }
 
                     baseUrl = $"{GraphApiBaseUrl}/me/mailFolders/{folderId}/messages";
@@ -418,20 +422,42 @@ public class OutlookMailProvider : IMailProvider
         }
     }
 
-    /// <summary>Graph's well-known mail folder names, which may be used in place of a folder id.
-    /// Returns the canonical lowercase spelling, or null when the name is a user folder that has
-    /// to be looked up by displayName.</summary>
+    /// <summary>Graph's well-known mail folder names, which may be used in place of a folder id,
+    /// plus the provider-agnostic aliases callers use (Sift's default folder set is modeled on
+    /// Gmail's labels, e.g. "Sent"/"Spam"/"Trash", which happen to equal Gmail's own well-known
+    /// names but not Graph's -- Graph's are "sentitems"/"junkemail"/"deleteditems"). Returns the
+    /// canonical lowercase spelling, or null when the name is a user folder that has to be looked
+    /// up by displayName.</summary>
     private static string? AsWellKnownFolderName(string folderName)
     {
         var normalized = folderName.Trim().ToLowerInvariant();
-        return WellKnownFolderNames.Contains(normalized) ? normalized : null;
+        return WellKnownFolderAliases.TryGetValue(normalized, out var canonical) ? canonical : null;
     }
 
-    private static readonly HashSet<string> WellKnownFolderNames = new(StringComparer.Ordinal)
+    private static readonly Dictionary<string, string> WellKnownFolderAliases = new(StringComparer.Ordinal)
     {
-        "archive", "clutter", "conflicts", "conversationhistory", "deleteditems", "drafts",
-        "inbox", "junkemail", "localfailures", "msgfolderroot", "outbox", "recoverableitemsdeletions",
-        "scheduled", "searchfolders", "sentitems", "serverfailures", "syncissues",
+        ["archive"] = "archive",
+        ["clutter"] = "clutter",
+        ["conflicts"] = "conflicts",
+        ["conversationhistory"] = "conversationhistory",
+        ["deleteditems"] = "deleteditems",
+        ["deleted"] = "deleteditems",
+        ["trash"] = "deleteditems",
+        ["drafts"] = "drafts",
+        ["inbox"] = "inbox",
+        ["junkemail"] = "junkemail",
+        ["junk"] = "junkemail",
+        ["spam"] = "junkemail",
+        ["localfailures"] = "localfailures",
+        ["msgfolderroot"] = "msgfolderroot",
+        ["outbox"] = "outbox",
+        ["recoverableitemsdeletions"] = "recoverableitemsdeletions",
+        ["scheduled"] = "scheduled",
+        ["searchfolders"] = "searchfolders",
+        ["sentitems"] = "sentitems",
+        ["sent"] = "sentitems",
+        ["serverfailures"] = "serverfailures",
+        ["syncissues"] = "syncissues",
     };
 
     public async Task<string?> GetFolderIdAsync(string folderName, CancellationToken cancellationToken = default)
@@ -452,7 +478,13 @@ public class OutlookMailProvider : IMailProvider
                 return altFolderId;
             }
 
-            return null;
+            // Only fall back to the well-known-name alias once a real cached folder is ruled
+            // out: Graph's $count/ConsistencyLevel advanced-query path (used by the stats
+            // methods) doesn't reliably return @odata.count against the well-known-name route
+            // the way it does against a real folder GUID, so a folder that's actually present
+            // under a matching displayName (e.g. "Inbox") must resolve to its real id, not the
+            // "inbox" alias, even though Graph accepts either for a plain fetch.
+            return AsWellKnownFolderName(folderName);
         }
         catch (Exception ex)
         {
@@ -504,8 +536,12 @@ public class OutlookMailProvider : IMailProvider
 
         var since = RecentWindow.Since(days, timeZoneId).ToString("yyyy-MM-ddTHH:mm:ssZ");
         var baseUrl = $"{GraphApiBaseUrl}/me/mailFolders/{folderId}/messages";
-        var total = await GetOutlookCountAsync($"{baseUrl}?$filter=receivedDateTime ge {since}&$count=true&$top=0", cancellationToken);
-        var unread = await GetOutlookCountAsync($"{baseUrl}?$filter=receivedDateTime ge {since} and isRead eq false&$count=true&$top=0", cancellationToken);
+        // $top=0 never populates @odata.count on this endpoint (confirmed against live Graph --
+        // the response comes back 200 OK with an empty "value" and no @odata.count at all,
+        // filter/orderby notwithstanding). $top=1 does, correctly reporting 0 when nothing
+        // matches; the one item is discarded, only the count is used.
+        var total = await GetOutlookCountAsync($"{baseUrl}?$filter=receivedDateTime ge {since}&$count=true&$top=1", cancellationToken);
+        var unread = await GetOutlookCountAsync($"{baseUrl}?$filter=receivedDateTime ge {since} and isRead eq false&$count=true&$top=1", cancellationToken);
         return new MailFolderStats { FolderName = folderName, TotalCount = total, UnreadCount = unread };
     }
 
