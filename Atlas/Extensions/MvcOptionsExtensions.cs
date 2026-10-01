@@ -108,6 +108,10 @@ public static class MvcOptionsExtension
                                 {
                                     var propType = p.PropertyType;
 
+                                    // Value data that only looks like a navigation (e.g. a JSON-column list).
+                                    if (p.IsDefined(typeof(KeepInRequestAttribute), true))
+                                        return false;
+
                                     // Check if it's a class (excluding string and primitives)
                                     if (propType == typeof(string) || propType.IsPrimitive)
                                         return false;

@@ -178,8 +178,11 @@ public static class BrutalObservability
 
     static void ConfigureLogger(LoggerConfiguration lc, IConfiguration config, string serviceName)
     {
-        var console = (Environment.GetEnvironmentVariable("LOG_FORMAT") ?? "json")
-            .Equals("console", StringComparison.OrdinalIgnoreCase);
+        // A debugger implies a human at a local console, not Loki/Alloy scraping stdout —
+        // skip the JSON schema even if LOG_FORMAT wasn't overridden.
+        var console = Debugger.IsAttached ||
+            (Environment.GetEnvironmentVariable("LOG_FORMAT") ?? "json")
+                .Equals("console", StringComparison.OrdinalIgnoreCase);
 
         lc.ReadFrom.Configuration(config)          // honours the "Serilog" config section
             .Enrich.FromLogContext()
