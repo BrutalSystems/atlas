@@ -63,6 +63,12 @@ public class BaseService<TEntity, TContext> : BaseService where TEntity : BaseMo
     /// </summary>
     protected async Task EnqueueJobAsync(IJob job, JobUrgency? urgencyOverride = null, JobContext? jobContext = null)
     {
+        if (_context.UserContext?.SuppressJobs == true)
+        {
+            Logger.LogDebug("Job {JobType} suppressed for this scope (UserContext.SuppressJobs).", job.JobType);
+            return;
+        }
+
         var urgency = urgencyOverride ?? job.Urgency;
         jobContext ??= new JobContext(
             _context.UserContext?.TenantId,

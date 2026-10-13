@@ -20,6 +20,10 @@ public class UserContext
     public string? UserName { get; private set; }
     public string? TenantId { get; internal set; }
     public bool IsMockUser { get; private set; } = false;
+
+    /// <summary>When set, <c>BaseService.EnqueueJobAsync</c> drops jobs instead of enqueueing (or running) them. For work
+    /// that will be rolled back — e.g. an import dry run — where a job would act on rows that never get committed.</summary>
+    public bool SuppressJobs { get; set; }
     public string? Issuer { get; private set; }    
     public bool IsAuthenticated { get; } = false;
     public IHeaderDictionary? Headers { get; set; }
