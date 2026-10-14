@@ -89,6 +89,9 @@ public class UserContext
         this.Audience = (string?)this.Claims.FirstOrDefault(x => x.Type == "aud")?.Value;
         this.ClientId = (string?)this.Claims.FirstOrDefault(x => x.Type == "client_id")?.Value;
         this.AuthUserId = httpContext!.User?.Claims?.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier || c.Type == "sub")?.Value;
+        // A user's id is their auth id (brokenhip: User.Id == Firebase UID), so without an explicit `userId`
+        // claim the token's subject is the user id.
+        this.UserId ??= this.AuthUserId;
 
         this.UserEmail = this.Claims.FirstOrDefault(x => x.Type == System.Security.Claims.ClaimTypes.Email)?.Value
                          ?? (string?)this.Claims.FirstOrDefault(x =>
@@ -129,7 +132,7 @@ public class UserContext
     {
         // CacheClient = new InMemoryCacheClient();
         this.TenantId = jobContext.TenantId;
-        this.AuthUserId = jobContext.AuthUserId;
+        this.UserId = this.AuthUserId = jobContext.AuthUserId;
     }
 
     /// <summary>
@@ -140,7 +143,7 @@ public class UserContext
     public void SetJobContext(JobContext jobContext)
     {
         this.TenantId = jobContext.TenantId;
-        this.AuthUserId = jobContext.AuthUserId;
+        this.UserId = this.AuthUserId = jobContext.AuthUserId;
     }
 
     /// <summary>
