@@ -5,13 +5,35 @@ using Atlas.Models;
 using Atlas.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Atlas.Mvc;
 
 public class BaseController : ControllerBase
 {
+    /// <summary>
+    /// A 500 for an unexpected exception. Always carries <paramref name="message"/> and the request's trace id; in
+    /// Development it also carries the real error (innermost messages, exception type, full stack trace) so it shows in
+    /// the browser instead of only in the server log.
+    /// </summary>
+    protected ObjectResult ServerError(Exception ex, string message)
+    {
+        var body = new Dictionary<string, object?> { ["message"] = message, ["traceId"] = HttpContext.TraceIdentifier };
+        if (HttpContext.RequestServices.GetService<IHostEnvironment>()?.IsDevelopment() == true)
+        {
+            body["detail"] = string.Join(" → ", ExceptionChain(ex).Select(e => e.Message).Distinct());
+            body["exceptionType"] = ex.GetType().FullName;
+            body["stackTrace"] = ex.ToString();
+        }
+        return StatusCode(500, body);
+    }
 
+    private static IEnumerable<Exception> ExceptionChain(Exception ex)
+    {
+        for (var e = ex; e != null; e = e.InnerException) yield return e;
+    }
 }
 
 [ApiController]
@@ -48,7 +70,7 @@ public abstract class BaseController<TEntity, TContext>(BaseService<TEntity, TCo
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error retrieving all {EntityType}", typeof(TEntity).Name);
-            return StatusCode(500, new { Message = "An error occurred while retrieving entities" });
+            return ServerError(ex, "An error occurred while retrieving entities");
         }
     }
 
@@ -83,7 +105,7 @@ public abstract class BaseController<TEntity, TContext>(BaseService<TEntity, TCo
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error retrieving {EntityType} with ID {Id}", typeof(TEntity).Name, id);
-            return StatusCode(500, new { Message = "An error occurred while retrieving the entity" });
+            return ServerError(ex, "An error occurred while retrieving the entity");
         }
     }
 
@@ -112,7 +134,7 @@ public abstract class BaseController<TEntity, TContext>(BaseService<TEntity, TCo
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error querying {EntityType}", typeof(TEntity).Name);
-            return StatusCode(500, new { Message = "An error occurred while querying entities" });
+            return ServerError(ex, "An error occurred while querying entities");
         }
     }
 
@@ -165,7 +187,7 @@ public abstract class BaseController<TEntity, TContext>(BaseService<TEntity, TCo
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error creating {EntityType}", typeof(TEntity).Name);
-            return StatusCode(500, new { Message = $"An error occurred while creating the entity; {ex.InnerException?.Message}" });
+            return ServerError(ex, $"An error occurred while creating the entity; {ex.InnerException?.Message}");
         }
     }
 
@@ -230,7 +252,7 @@ public abstract class BaseController<TEntity, TContext>(BaseService<TEntity, TCo
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error updating {EntityType} with ID {Id}", typeof(TEntity).Name, id);
-            return StatusCode(500, new { Message = "An error occurred while updating the entity" });
+            return ServerError(ex, "An error occurred while updating the entity");
         }
     }
 
@@ -269,7 +291,7 @@ public abstract class BaseController<TEntity, TContext>(BaseService<TEntity, TCo
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error deleting {EntityType} with ID {Id}", typeof(TEntity).Name, id);
-            return StatusCode(500, new { Message = "An error occurred while deleting the entity" });
+            return ServerError(ex, "An error occurred while deleting the entity");
         }
     }
 }
