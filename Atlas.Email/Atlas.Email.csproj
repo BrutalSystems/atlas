@@ -6,6 +6,11 @@
     <Nullable>enable</Nullable>
     <OutputType>Library</OutputType>
     <PackageId>BrutalSystems.Atlas.Email</PackageId>
+    <Authors>BrutalSystems</Authors>
+    <Company>BrutalSystems</Company>
+    <Description>Email delivery for Atlas apps (SMTP via MailKit).</Description>
+    <RepositoryUrl>https://github.com/BrutalSystems/atlas</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
     <IsPackable>true</IsPackable>
     <Version>0.1.0</Version>
     <Configurations>Debug;Release</Configurations>
