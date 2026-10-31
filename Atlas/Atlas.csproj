@@ -11,6 +11,8 @@
     <Description>Atlas application framework: data access, multi-tenancy and API plumbing for BrutalSystems services.</Description>
     <RepositoryUrl>https://github.com/BrutalSystems/atlas</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
+    <Copyright>Copyright (c) 2026 BrutalSystems. All rights reserved.</Copyright>
+    <PackageLicenseFile>LICENSE</PackageLicenseFile>
     <IsPackable>true</IsPackable>     
     <Configurations>Debug;Release</Configurations>
     <Platforms>AnyCPU</Platforms>     
@@ -35,6 +37,10 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Atlas.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\LICENSE" Pack="true" PackagePath="" Visible="false" />
   </ItemGroup>
 
 </Project>

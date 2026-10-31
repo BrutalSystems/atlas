@@ -11,6 +11,8 @@
     <Description>Email delivery for Atlas apps (SMTP via MailKit).</Description>
     <RepositoryUrl>https://github.com/BrutalSystems/atlas</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
+    <Copyright>Copyright (c) 2026 BrutalSystems. All rights reserved.</Copyright>
+    <PackageLicenseFile>LICENSE</PackageLicenseFile>
     <IsPackable>true</IsPackable>
     <Version>0.1.0</Version>
     <Configurations>Debug;Release</Configurations>
@@ -27,6 +29,10 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Atlas.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\LICENSE" Pack="true" PackagePath="" Visible="false" />
   </ItemGroup>
 
 </Project>

@@ -11,6 +11,8 @@
     <Description>Structured logging (Serilog) and OpenTelemetry traces and metrics for Atlas apps.</Description>
     <RepositoryUrl>https://github.com/BrutalSystems/atlas</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
+    <Copyright>Copyright (c) 2026 BrutalSystems. All rights reserved.</Copyright>
+    <PackageLicenseFile>LICENSE</PackageLicenseFile>
     <IsPackable>true</IsPackable>
     <Version>0.1.0</Version>
     <Configurations>Debug;Release</Configurations>
@@ -33,6 +35,10 @@
     <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.16.0" />
     <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.16.0" />
     <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.15.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\LICENSE" Pack="true" PackagePath="" Visible="false" />
   </ItemGroup>
 
 </Project>
