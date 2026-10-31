@@ -8,10 +8,13 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # version-bump commit
+      id-token: write  # OIDC token for nuget.org Trusted Publishing
     steps:
       - name: Branch name
         run: echo running on branch ${GITHUB_REF##*/}
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Setup .NET Core
         uses: actions/setup-dotnet@v4
         with:
@@ -47,6 +50,13 @@ jobs:
 
       - run: git config --global user.name "GitHub Action"
       - run: git config --global user.email "github-action@users.noreply.github.com"
+      # Trusted Publishing: trades the GitHub OIDC token for a short-lived nuget.org API key
+      - name: NuGet login
+        uses: NuGet/login@v1
+        id: nuget-login
+        with:
+          user: ${{ secrets.NUGET_USER }}
+
       - name: Publish package
         run: |
           pwd
@@ -55,4 +65,4 @@ jobs:
         env:
           ATLAS_VER: ${{ env.VERSION_NUMBER }}
           ATLAS_RELEASE: -dbg
-          NUGET_TOKEN: ${{ secrets.NUGET_TOKEN }}
+          NUGET_TOKEN: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}

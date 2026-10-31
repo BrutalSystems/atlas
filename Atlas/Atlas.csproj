@@ -5,8 +5,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <OutputType>Library</OutputType>
-    <OutputType>Library</OutputType>        
-    <PackageId>Atlas1023</PackageId>
+    <PackageId>BrutalSystems.Atlas</PackageId>
+    <Authors>BrutalSystems</Authors>
+    <Company>BrutalSystems</Company>
+    <Description>Atlas application framework: data access, multi-tenancy and API plumbing for BrutalSystems services.</Description>
+    <RepositoryUrl>https://github.com/BrutalSystems/atlas</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
     <IsPackable>true</IsPackable>     
     <Configurations>Debug;Release</Configurations>
     <Platforms>AnyCPU</Platforms>     

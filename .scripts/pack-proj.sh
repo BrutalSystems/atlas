@@ -1,3 +1,5 @@
+set -euo pipefail
+
 # $1 {project}
 # $2 {version}
 # $3 {package name}
@@ -14,4 +16,4 @@ echo ========
 
 dotnet pack --configuration Debug -p:Version=$2 $CSPROJ
 
-dotnet nuget push "$NUPKGPATH" -s https://api.nuget.org/v3/index.json -k $NUGET_TOKEN
+dotnet nuget push "$NUPKGPATH" -s https://api.nuget.org/v3/index.json -k "$NUGET_TOKEN" --skip-duplicate
