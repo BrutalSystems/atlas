@@ -35,12 +35,18 @@
          that bring it in (Microsoft.Identity.Web, Microsoft.Data.SqlClient) depend on a fixed version.
          - System.Security.Cryptography.Xml 10.0.9 (Identity.Web → Data Protection): fixed in 10.0.10 (CVE-2026-50648 and others).
          - System.Security.Cryptography.Pkcs 10.0.7 (Identity.Web, SqlClient): GHSA-846f-f764-76mx. -->
-    <!-- NU1510: ASP.NET Core ships this assembly too, but the pin is what clears the NuGet audit for Atlas consumers. -->
-    <PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.14" NoWarn="NU1510" />
+    <PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.14" />
     <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.14" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.NewtonsoftJson" Version="10.0.14" />
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
   </ItemGroup>
+
+  <!-- .NET 10 prunes package references to assemblies the ASP.NET Core framework ships, and a pruned reference is left
+       out of the packed .nuspec: 0.2.12 shipped without its Cryptography.Xml pin, so apps using Atlas still got the
+       vulnerable version through Identity.Web. With pruning off, the pins below reach every app that uses Atlas. -->
+  <PropertyGroup>
+    <RestoreEnablePackagePruning>false</RestoreEnablePackagePruning>
+  </PropertyGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="Atlas.Tests" />
