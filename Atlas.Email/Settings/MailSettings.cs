@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Atlas.Helpers;
 
 namespace Atlas.Email.Settings;
 
@@ -119,10 +120,21 @@ public abstract class MailSettings
         return Encrypt(jsonWithType, encryptionKey);
     }
 
+    /// <summary>Marks a value encrypted with a configured key. Values without it were written with
+    /// the legacy built-in key. ':' never occurs in base64, so the two formats can't be confused.</summary>
+    private const string ConfiguredKeyPrefix = "v2:";
+
     public static string Encrypt(string plainText, string? encryptionKey = null)
     {
-        var key = DeriveKey(encryptionKey);
+        if (encryptionKey != null) return EncryptWith(plainText, DeriveKey(encryptionKey));
 
+        var source = ResolveKeySource();
+        var cipherText = EncryptWith(plainText, DeriveKey(source));
+        return source == LegacyKey ? cipherText : ConfiguredKeyPrefix + cipherText;
+    }
+
+    private static string EncryptWith(string plainText, byte[] key)
+    {
         using var aes = Aes.Create();
         aes.Key = key;
         aes.GenerateIV();
@@ -143,7 +155,31 @@ public abstract class MailSettings
 
     public static string Decrypt(string cipherText, string? encryptionKey = null)
     {
-        var key = DeriveKey(encryptionKey);
+        var configuredFormat = cipherText.StartsWith(ConfiguredKeyPrefix, StringComparison.Ordinal);
+        var body = configuredFormat ? cipherText[ConfiguredKeyPrefix.Length..] : cipherText;
+
+        if (encryptionKey != null) return DecryptWith(body, DeriveKey(encryptionKey));
+
+        var source = ResolveKeySource();
+        if (configuredFormat)
+        {
+            if (source == LegacyKey)
+                throw new InvalidOperationException(
+                    $"This value was encrypted with a configured key, but {KeySetting} is not set.");
+            return DecryptWith(body, DeriveKey(source));
+        }
+
+        // Legacy format. Allowed where the legacy key is the current key (Development/Test without a
+        // configured key), or when migrating. The caller's next save re-encrypts it as v2.
+        if (source != LegacyKey && !AllowLegacyKey())
+            throw new InvalidOperationException(
+                $"This value was encrypted with the legacy built-in key. Set {AllowLegacyKeySetting}=true "
+                + "to read it; it is re-encrypted with the configured key the next time it's saved.");
+        return DecryptWith(body, DeriveKey(LegacyKey));
+    }
+
+    private static string DecryptWith(string cipherText, byte[] key)
+    {
         var buffer = Convert.FromBase64String(cipherText);
 
         using var aes = Aes.Create();
@@ -161,11 +197,63 @@ public abstract class MailSettings
         return srDecrypt.ReadToEnd();
     }
 
-    private static byte[] DeriveKey(string? encryptionKey)
-    {
-        var keySource = encryptionKey ?? "SiftDefaultEncryptionKey2024!ChangeInProduction";
+    /// <summary>The configuration key holding the encryption key (env var <c>MailEncryption__Key</c>).
+    /// Any random string of at least <see cref="MinimumKeyLength"/> characters; it is hashed to the
+    /// 256-bit AES key. Changing it makes everything already stored unreadable, unless
+    /// <see cref="AllowLegacyKeySetting"/> covers the old key.</summary>
+    public const string KeySetting = "MailEncryption:Key";
 
-        using var sha256 = SHA256.Create();
-        return sha256.ComputeHash(Encoding.UTF8.GetBytes(keySource));
+    /// <summary>When true, <see cref="Decrypt"/> reads values written with the legacy built-in key (those
+    /// without the <c>v2:</c> prefix) even though a key is configured. Callers write settings back
+    /// after use, so each value is re-encrypted with the configured key the next time it's saved.
+    /// Turn it off once that's done.</summary>
+    public const string AllowLegacyKeySetting = "MailEncryption:AllowLegacyKey";
+
+    public const int MinimumKeyLength = 32;
+
+    /// <summary>The key every Atlas.Email value was encrypted with before a key could be configured.
+    /// It is in this public source, so it protects nothing. Kept only so Development/Test keep
+    /// working without configuration and so old values can be migrated (see
+    /// <see cref="AllowLegacyKeySetting"/>).</summary>
+    private const string LegacyKey = "SiftDefaultEncryptionKey2024!ChangeInProduction";
+
+    private static string? _configuredKey;
+    private static bool? _allowLegacyKey;
+
+    /// <summary>Overrides the key read from configuration. For tests and for hosts that load the key
+    /// from somewhere other than <see cref="Env"/>'s configuration. Null goes back to configuration.</summary>
+    public static void ConfigureEncryption(string? key, bool? allowLegacyKey = null)
+    {
+        _configuredKey = key;
+        _allowLegacyKey = allowLegacyKey;
     }
+
+    /// <summary>Throws unless a usable key is configured, or this is Development/Test (which fall back
+    /// to the legacy key). Call at startup so a missing key fails the deploy, not the first sync.</summary>
+    public static void EnsureEncryptionKeyConfigured() => _ = ResolveKeySource();
+
+    private static string ResolveKeySource()
+    {
+        var key = _configuredKey ?? Env.GetConfiguration()[KeySetting];
+        if (!string.IsNullOrEmpty(key))
+        {
+            if (key.Length < MinimumKeyLength)
+                throw new InvalidOperationException(
+                    $"{KeySetting} must be at least {MinimumKeyLength} characters.");
+            return key;
+        }
+
+        if (Env.IsDevelopment || Env.IsTest)
+            return LegacyKey;
+
+        throw new InvalidOperationException(
+            $"{KeySetting} (env MailEncryption__Key) is not set. Atlas.Email will not encrypt mail "
+            + "credentials with the built-in key outside Development/Test.");
+    }
+
+    private static bool AllowLegacyKey() =>
+        _allowLegacyKey ?? string.Equals(Env.GetConfiguration()[AllowLegacyKeySetting], "true",
+            StringComparison.OrdinalIgnoreCase);
+
+    private static byte[] DeriveKey(string keySource) => SHA256.HashData(Encoding.UTF8.GetBytes(keySource));
 }
