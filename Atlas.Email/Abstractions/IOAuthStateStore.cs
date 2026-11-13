@@ -25,6 +25,10 @@ public sealed class OAuthFlowState
     /// <summary>Target account when reconnecting. Only ever set after an ownership check.</summary>
     public string? RowId { get; set; }
 
+    /// <summary>Extra features the flow asked for, comma-separated (<see cref="Settings.MailScopes.Contacts"/>), or
+    /// null for mail only. Only ever set together with <see cref="RowId"/>.</summary>
+    public string? Features { get; set; }
+
     /// <summary>Must be UTC. Npgsql rejects any non-zero offset.</summary>
     public DateTimeOffset ExpiresAt { get; set; }
 }

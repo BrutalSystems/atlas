@@ -34,8 +34,6 @@ public class GoogleOAuthController : ControllerBase
     private const string TokenUrl = "https://oauth2.googleapis.com/token";
     private const string UserInfoUrl = "https://www.googleapis.com/oauth2/v2/userinfo";
 
-    private const string RequiredScopes = "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/userinfo.email";
-
     public GoogleOAuthController(
         ILogger<GoogleOAuthController> logger,
         IMailAccountStore accountStore,
@@ -60,9 +58,11 @@ public class GoogleOAuthController : ControllerBase
     /// Initiates the OAuth flow by returning the authorization URL.
     /// Frontend should redirect the user to this URL.
     /// </summary>
+    /// <param name="features">Extra access for an already connected mailbox (<paramref name="accountId"/>):
+    /// "contacts" adds the contacts scopes (<see cref="MailScopes"/>). A reconnect keeps contacts once granted.</param>
     [HttpGet("authorize-url")]
     [Authorize]
-    public async Task<IActionResult> GetAuthorizeUrl([FromQuery] string returnUrl, [FromQuery] string? accountId = null)
+    public async Task<IActionResult> GetAuthorizeUrl([FromQuery] string returnUrl, [FromQuery] string? accountId = null, [FromQuery] string? features = null)
     {
         if (_stateStore == null || _googleSettings == null)
         {
@@ -79,6 +79,17 @@ public class GoogleOAuthController : ControllerBase
             return BadRequest("returnUrl is not an allowed origin.");
         }
 
+        var wanted = MailScopes.ParseFeatures(features);
+        if (wanted == null)
+        {
+            return BadRequest("features names an unknown feature.");
+        }
+        if (wanted.Count > 0 && string.IsNullOrEmpty(accountId))
+        {
+            return BadRequest("features are added to a mailbox that is already connected: pass its accountId.");
+        }
+
+        IMailAccountRecord? existing = null;
         if (!string.IsNullOrEmpty(accountId))
         {
             // sift#5: accountId is caller-supplied and this flow later overwrites that account's
@@ -88,7 +99,7 @@ public class GoogleOAuthController : ControllerBase
             // check degrade to allow-all. NotFound rather than Forbid, deliberately: account ids
             // are ULIDs and ULIDs are guessable within a millisecond, so "exists but is not yours"
             // must not be distinguishable from "does not exist".
-            var existing = await _accountStore.GetByIdAsync(accountId);
+            existing = await _accountStore.GetByIdAsync(accountId);
             if (!MailAccountOwnership.IsOwnedBy(existing, _userContext.TenantId, _userContext.UserId))
             {
                 _logger.LogWarning(
@@ -111,17 +122,23 @@ public class GoogleOAuthController : ControllerBase
             UserId = this._userContext.UserId,
             AuthUserId = this._userContext.AuthUserId,
             RowId = accountId,
+            Features = wanted.Count > 0 ? string.Join(",", wanted) : null,
             ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(_flowSettings.StateTtlMinutes),
         });
+
+        // Contacts once granted stay asked for on a reconnect, so reconnecting doesn't quietly drop them.
+        var contacts = wanted.Contains(MailScopes.Contacts) || HasContacts(existing);
 
         var authorizeUrl = $"{AuthorizeUrl}?" +
                            $"client_id={Uri.EscapeDataString(_googleSettings.ClientId)}&" +
                            $"response_type=code&" +
                            $"redirect_uri={Uri.EscapeDataString(redirectUri)}&" +
-                           $"scope={Uri.EscapeDataString(RequiredScopes)}&" +
+                           $"scope={Uri.EscapeDataString(MailScopes.Google(contacts))}&" +
+                           $"include_granted_scopes=true&" +
                            $"access_type=offline&" +
                            $"prompt=consent&" +
-                           $"state={Uri.EscapeDataString(stateToken)}";
+                           $"state={Uri.EscapeDataString(stateToken)}" +
+                           (existing == null ? "" : $"&login_hint={Uri.EscapeDataString(existing.Email)}");
 
         _logger.LogInformation("Generated Google OAuth authorize URL for user {UserId}", _userContext.AuthUserId);
 
@@ -176,6 +193,16 @@ public class GoogleOAuthController : ControllerBase
             }
 
             var userEmail = await GetUserEmail(tokenResponse.AccessToken);
+
+            // Adding contacts to a mailbox must not turn it into another account if the person picked a different
+            // one on the provider's screen.
+            if (flow.Features != null && flow.RowId != null
+                && await _accountStore.GetByIdAsync(flow.RowId) is { } target
+                && !string.Equals(target.Email, userEmail, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning("Google OAuth callback for account {AccountId} came back as another mailbox", flow.RowId);
+                return Redirect($"{flow.ReturnUrl}?error=wrong_account");
+            }
 
             await SaveAccountWithTokens(flow, userEmail, tokenResponse);
 
@@ -306,7 +333,8 @@ public class GoogleOAuthController : ControllerBase
         {
             AccessToken = tokenData.GetProperty("access_token").GetString() ?? "",
             RefreshToken = tokenData.TryGetProperty("refresh_token", out var rt) ? rt.GetString() : null,
-            ExpiresIn = tokenData.GetProperty("expires_in").GetInt32()
+            ExpiresIn = tokenData.GetProperty("expires_in").GetInt32(),
+            Scope = tokenData.TryGetProperty("scope", out var scope) ? scope.GetString() : null,
         };
     }
 
@@ -337,7 +365,8 @@ public class GoogleOAuthController : ControllerBase
             ClientSecret = _googleSettings!.ClientSecret,
             AccessToken = tokenResponse.AccessToken,
             RefreshToken = tokenResponse.RefreshToken ?? string.Empty,
-            TokenExpiry = DateTime.UtcNow.AddSeconds(tokenResponse.ExpiresIn)
+            TokenExpiry = DateTime.UtcNow.AddSeconds(tokenResponse.ExpiresIn),
+            GrantedScopes = tokenResponse.Scope,
         };
 
         var encryptedSettings = gmailSettings.ToEncryptedJson();
@@ -376,5 +405,13 @@ public class GoogleOAuthController : ControllerBase
         public string AccessToken { get; set; } = string.Empty;
         public string? RefreshToken { get; set; }
         public int ExpiresIn { get; set; }
+        public string? Scope { get; set; }
+    }
+
+    private static bool HasContacts(IMailAccountRecord? account)
+    {
+        if (string.IsNullOrEmpty(account?.EncryptedSettings)) return false;
+        try { return MailScopes.HasContacts(MailSettings.FromEncryptedJson(account.EncryptedSettings)); }
+        catch (Exception) { return false; } // unreadable settings: a plain mail reconnect
     }
 }

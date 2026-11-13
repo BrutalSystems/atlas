@@ -31,6 +31,12 @@ public abstract class MailSettings
     public string Password { get; set; } = string.Empty;
 
     /// <summary>
+    /// The OAuth scopes the provider granted, space-separated, as its token response gave them. Null for IMAP and
+    /// for accounts connected before Atlas recorded it (those have the mail scopes only). See <see cref="MailScopes"/>.
+    /// </summary>
+    public string? GrantedScopes { get; set; }
+
+    /// <summary>
     /// Deserializes and decrypts mail settings from encrypted JSON.
     /// </summary>
     public static MailSettings FromEncryptedJson(string encryptedJson, string? encryptionKey = null)
