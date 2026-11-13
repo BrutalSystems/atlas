@@ -605,6 +605,8 @@ public class OutlookMailProvider : IMailProvider
 
             outlookSettings.AccessToken = tokenData.GetProperty("access_token").GetString() ?? "";
             outlookSettings.RefreshToken = tokenData.TryGetProperty("refresh_token", out var rt) && rt.GetString() != null ? rt.GetString()! : outlookSettings.RefreshToken;
+            // The provider says what the token still covers: contacts the person removed at the provider drop out here.
+            if (tokenData.TryGetProperty("scope", out var scope) && scope.GetString() is { Length: > 0 } granted) outlookSettings.GrantedScopes = granted;
             outlookSettings.TokenExpiration = DateTimeOffset.UtcNow.AddSeconds(tokenData.GetProperty("expires_in").GetInt32());
 
             _logger.LogInformation("Successfully refreshed token for {Username}", outlookSettings.Username);

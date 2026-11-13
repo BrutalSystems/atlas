@@ -680,6 +680,8 @@ public class GoogleMailProvider : IMailProvider
 
             gmailSettings.AccessToken = tokenData.GetProperty("access_token").GetString() ?? "";
             gmailSettings.RefreshToken = tokenData.TryGetProperty("refresh_token", out var rt) && rt.GetString() != null ? rt.GetString()! : gmailSettings.RefreshToken;
+            // The provider says what the token still covers: contacts the person removed at the provider drop out here.
+            if (tokenData.TryGetProperty("scope", out var scope) && scope.GetString() is { Length: > 0 } granted) gmailSettings.GrantedScopes = granted;
             gmailSettings.TokenExpiry = DateTime.UtcNow.AddSeconds(tokenData.GetProperty("expires_in").GetInt32());
 
             _logger.LogInformation("Successfully refreshed token for {Username}", gmailSettings.Username);
