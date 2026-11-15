@@ -37,4 +37,19 @@ public interface IMailProvider
     Task<MailSettings> RefreshTokenAsync(CancellationToken cancellationToken = default);
 
     Task<ConnectionTestResult> TestConnectionAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The files attached to a message, inline ones included (see <see cref="MailAttachment.IsInline"/>). IMAP needs the
+    /// message's folder in <c>message.Folders</c>; Gmail and Outlook find the message by id alone. Providers that don't
+    /// support attachments throw <see cref="NotSupportedException"/>.
+    /// </summary>
+    Task<IReadOnlyList<MailAttachment>> GetAttachmentsAsync(MailMessage message, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException($"{GetType().Name} can't read attachments.");
+
+    /// <summary>
+    /// One attachment's bytes, by the <see cref="MailAttachment.Id"/> <see cref="GetAttachmentsAsync"/> gave, or null when
+    /// the message has no such attachment.
+    /// </summary>
+    Task<byte[]?> GetAttachmentContentAsync(MailMessage message, string attachmentId, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException($"{GetType().Name} can't read attachments.");
 }

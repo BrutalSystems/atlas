@@ -906,6 +906,72 @@ public class OutlookMailProvider : IMailProvider
         }
     }
 
+    /// <summary>File attachments only: an attached Outlook item (an email or event) or a cloud link has no file to give.</summary>
+    public async Task<IReadOnlyList<MailAttachment>> GetAttachmentsAsync(MailMessage message, CancellationToken cancellationToken = default)
+    {
+        var url = $"{GraphApiBaseUrl}/me/messages/{message.MessageId}/attachments?$select=id,name,contentType,size,isInline";
+        var content = await _api.ExecuteHttpAsync<JsonElement>(
+            provider: "microsoft",
+            operation: "Graph.Attachments.List",
+            limiterGroup: "get",
+            accountKey: outlookSettings.Username,
+            maxConcurrency: 20,
+            sendAsync: ct =>
+            {
+                var request = new HttpRequestMessage(HttpMethod.Get, url);
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", outlookSettings.AccessToken);
+                return _httpClient.SendAsync(request, ct);
+            },
+            parseAsync: async (response, ct) =>
+            {
+                using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+                return doc.RootElement.Clone();
+            },
+            ensureSuccess: true,
+            cancellationToken: cancellationToken);
+
+        var attachments = new List<MailAttachment>();
+        if (!content.TryGetProperty("value", out var values)) return attachments;
+        foreach (var a in values.EnumerateArray())
+        {
+            if (a.TryGetProperty("@odata.type", out var type) && type.GetString() != "#microsoft.graph.fileAttachment") continue;
+            attachments.Add(new MailAttachment
+            {
+                Id = a.GetProperty("id").GetString() ?? string.Empty,
+                FileName = a.TryGetProperty("name", out var name) ? name.GetString() ?? "attachment" : "attachment",
+                ContentType = a.TryGetProperty("contentType", out var ctype) && ctype.ValueKind == JsonValueKind.String ? ctype.GetString()! : "application/octet-stream",
+                Size = a.TryGetProperty("size", out var size) ? size.GetInt64() : 0,
+                IsInline = a.TryGetProperty("isInline", out var inline) && inline.ValueKind == JsonValueKind.True,
+            });
+        }
+        return attachments;
+    }
+
+    public async Task<byte[]?> GetAttachmentContentAsync(MailMessage message, string attachmentId, CancellationToken cancellationToken = default)
+    {
+        var url = $"{GraphApiBaseUrl}/me/messages/{message.MessageId}/attachments/{Uri.EscapeDataString(attachmentId)}/$value";
+        return await _api.ExecuteHttpAsync<byte[]?>(
+            provider: "microsoft",
+            operation: "Graph.Attachments.Get",
+            limiterGroup: "get",
+            accountKey: outlookSettings.Username,
+            maxConcurrency: 20,
+            sendAsync: ct =>
+            {
+                var request = new HttpRequestMessage(HttpMethod.Get, url);
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", outlookSettings.AccessToken);
+                return _httpClient.SendAsync(request, ct);
+            },
+            parseAsync: async (response, ct) =>
+            {
+                if (response.StatusCode == HttpStatusCode.NotFound) return null;
+                response.EnsureSuccessStatusCode();
+                return await response.Content.ReadAsByteArrayAsync(ct);
+            },
+            ensureSuccess: false,
+            cancellationToken: cancellationToken);
+    }
+
     private async Task<List<string>> GetMessageCategoriesAsync(string messageId, CancellationToken cancellationToken)
     {
         var url = $"{GraphApiBaseUrl}/me/messages/{messageId}?$select=categories";

@@ -556,6 +556,79 @@ public class ImapMailProvider : IMailProvider
         return result;
     }
 
+    public async Task<IReadOnlyList<MailAttachment>> GetAttachmentsAsync(MailMessage message, CancellationToken cancellationToken = default)
+    {
+        return await _imapExec.ExecuteAsync(
+            provider: "imap",
+            operation: "Imap.GetAttachments",
+            limiterGroup: "imap",
+            accountKey: imapSettings.Username,
+            maxConcurrency: 1,
+            opAsync: async ct =>
+            {
+                var (_, parts) = await GetAttachmentPartsAsync(message, ct);
+                return (IReadOnlyList<MailAttachment>)parts.Select(p => new MailAttachment
+                {
+                    Id = p.PartSpecifier,
+                    FileName = string.IsNullOrEmpty(p.FileName) ? "attachment" : p.FileName,
+                    ContentType = p.ContentType.MimeType,
+                    Size = p.Octets,
+                    IsInline = p.ContentDisposition?.Disposition is { } d
+                        ? d.Equals(MimeKit.ContentDisposition.Inline, StringComparison.OrdinalIgnoreCase)
+                        : !string.IsNullOrEmpty(p.ContentId),
+                }).ToList();
+            },
+            reconnectAsync: null,
+            allowRetry: true,
+            cancellationToken: cancellationToken);
+    }
+
+    public async Task<byte[]?> GetAttachmentContentAsync(MailMessage message, string attachmentId, CancellationToken cancellationToken = default)
+    {
+        return await _imapExec.ExecuteAsync(
+            provider: "imap",
+            operation: "Imap.GetAttachmentContent",
+            limiterGroup: "imap",
+            accountKey: imapSettings.Username,
+            maxConcurrency: 1,
+            opAsync: async ct =>
+            {
+                var (folder, parts) = await GetAttachmentPartsAsync(message, ct);
+                var part = parts.FirstOrDefault(p => p.PartSpecifier == attachmentId);
+                if (part == null) return null;
+
+                // GetBodyPart fetches with BODY.PEEK, so reading an attachment doesn't mark the message read.
+                if (await folder.GetBodyPartAsync(GetMessageUniqueId(message.MessageId), part, ct) is not MimeKit.MimePart mime || mime.Content == null)
+                    return [];
+                using var stream = new MemoryStream();
+                await mime.Content.DecodeToAsync(stream, ct);
+                return stream.ToArray();
+            },
+            reconnectAsync: null,
+            allowRetry: true,
+            cancellationToken: cancellationToken);
+    }
+
+    /// <summary>The message's folder (from <c>message.Folders</c>, opened) and its parts with a file name or an attachment
+    /// disposition.</summary>
+    private async Task<(IMailFolder Folder, List<BodyPartBasic> Parts)> GetAttachmentPartsAsync(MailMessage message, CancellationToken ct)
+    {
+        var client = await GetImapClient(ct);
+        var named = message.Folders.FirstOrDefault();
+        var folder = named?.ProviderFolder as IMailFolder
+                     ?? (named == null || string.IsNullOrEmpty(named.Name) || named.Name.Equals("INBOX", StringComparison.OrdinalIgnoreCase)
+                         ? client.Inbox
+                         : await GetFolderAsync(named.Name, ct))
+                     ?? throw new InvalidOperationException($"Folder {named?.Name} not found");
+        if (!folder.IsOpen) await folder.OpenAsync(FolderAccess.ReadWrite, ct);
+
+        var uid = GetMessageUniqueId(message.MessageId);
+        var summary = (await folder.FetchAsync([uid], MessageSummaryItems.UniqueId | MessageSummaryItems.BodyStructure, ct)).FirstOrDefault()
+                      ?? throw new InvalidOperationException($"Message with ID {message.MessageId} not found");
+        var parts = summary.BodyParts.Where(p => p.IsAttachment || !string.IsNullOrEmpty(p.FileName)).ToList();
+        return (folder, parts);
+    }
+
     private UniqueId GetMessageUniqueId(string messageId)
     {
         if (uint.TryParse(messageId, out var uidValue))

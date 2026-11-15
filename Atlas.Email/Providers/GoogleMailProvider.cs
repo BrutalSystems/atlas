@@ -1032,6 +1032,118 @@ public class GoogleMailProvider : IMailProvider
         return false;
     }
 
+    public async Task<IReadOnlyList<MailAttachment>> GetAttachmentsAsync(MailMessage message, CancellationToken cancellationToken = default)
+    {
+        var json = await GetMessageJsonAsync(message.MessageId, cancellationToken)
+                   ?? throw new InvalidOperationException($"Message {message.MessageId} not found");
+        return AttachmentParts(json).Select(p => p.Attachment).ToList();
+    }
+
+    public async Task<byte[]?> GetAttachmentContentAsync(MailMessage message, string attachmentId, CancellationToken cancellationToken = default)
+    {
+        var json = await GetMessageJsonAsync(message.MessageId, cancellationToken)
+                   ?? throw new InvalidOperationException($"Message {message.MessageId} not found");
+        var part = AttachmentParts(json).FirstOrDefault(p => p.Attachment.Id == attachmentId);
+        if (part.Body.ValueKind == JsonValueKind.Undefined) return null;
+
+        // Small parts come with their data; the rest are fetched by Gmail's attachmentId, which is only good for this
+        // fetch of the message (it changes every time), so it's never what callers hold on to.
+        if (part.Body.TryGetProperty("data", out var data) && data.GetString() is { Length: > 0 } inline)
+            return DecodeBase64UrlBytes(inline);
+        if (!part.Body.TryGetProperty("attachmentId", out var gmailId)) return [];
+
+        var url = $"{GmailApiBaseUrl}/users/me/messages/{message.MessageId}/attachments/{gmailId.GetString()}";
+        var content = await _api.ExecuteHttpAsync<JsonElement?>(
+            provider: "google",
+            operation: "Gmail.Attachments.Get",
+            limiterGroup: "get",
+            accountKey: gmailSettings.Username,
+            maxConcurrency: 20,
+            sendAsync: ct =>
+            {
+                var req = new HttpRequestMessage(HttpMethod.Get, url);
+                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", gmailSettings.AccessToken);
+                return _httpClient.SendAsync(req, ct);
+            },
+            parseAsync: async (response, ct) =>
+            {
+                using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+                return doc.RootElement.Clone();
+            },
+            ensureSuccess: true,
+            cancellationToken: cancellationToken);
+
+        return content?.TryGetProperty("data", out var bytes) == true ? DecodeBase64UrlBytes(bytes.GetString() ?? "") : [];
+    }
+
+    private async Task<JsonElement?> GetMessageJsonAsync(string messageId, CancellationToken cancellationToken)
+    {
+        var url = $"{GmailApiBaseUrl}/users/me/messages/{messageId}?format=full";
+        return await _api.ExecuteHttpAsync<JsonElement?>(
+            provider: "google",
+            operation: "Gmail.Messages.Get",
+            limiterGroup: "get",
+            accountKey: gmailSettings.Username,
+            maxConcurrency: 20,
+            sendAsync: ct =>
+            {
+                var req = new HttpRequestMessage(HttpMethod.Get, url);
+                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", gmailSettings.AccessToken);
+                return _httpClient.SendAsync(req, ct);
+            },
+            parseAsync: async (response, ct) =>
+            {
+                if (response.StatusCode == HttpStatusCode.NotFound) return null;
+                response.EnsureSuccessStatusCode();
+                using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+                return doc.RootElement.Clone();
+            },
+            ensureSuccess: false,
+            cancellationToken: cancellationToken);
+    }
+
+    /// <summary>Every part of the message with a file name or an attachmentId, the top-level payload included (a message
+    /// that is just a file), keyed by MIME part id.</summary>
+    internal static IEnumerable<(MailAttachment Attachment, JsonElement Body)> AttachmentParts(JsonElement message)
+    {
+        if (!message.TryGetProperty("payload", out var payload)) yield break;
+        var pending = new Stack<JsonElement>([payload]);
+        while (pending.Count > 0)
+        {
+            var part = pending.Pop();
+            if (part.TryGetProperty("parts", out var children))
+                foreach (var child in children.EnumerateArray().Reverse()) pending.Push(child);
+
+            var fileName = part.TryGetProperty("filename", out var f) ? f.GetString() ?? "" : "";
+            part.TryGetProperty("body", out var body);
+            var hasId = body.ValueKind == JsonValueKind.Object && body.TryGetProperty("attachmentId", out _);
+            if (fileName.Length == 0 && !hasId) continue;
+
+            var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (part.TryGetProperty("headers", out var hs))
+                foreach (var h in hs.EnumerateArray())
+                    headers.TryAdd(h.GetProperty("name").GetString() ?? "", h.GetProperty("value").GetString() ?? "");
+            var disposition = headers.GetValueOrDefault("Content-Disposition") ?? "";
+
+            yield return (new MailAttachment
+            {
+                // The top-level payload's partId is empty; callers pass the id back, so give it a name.
+                Id = part.TryGetProperty("partId", out var pid) && pid.GetString() is { Length: > 0 } partId ? partId : "root",
+                FileName = fileName.Length > 0 ? fileName : "attachment",
+                ContentType = part.TryGetProperty("mimeType", out var mt) ? mt.GetString() ?? "application/octet-stream" : "application/octet-stream",
+                Size = body.ValueKind == JsonValueKind.Object && body.TryGetProperty("size", out var size) ? size.GetInt64() : 0,
+                IsInline = disposition.StartsWith("inline", StringComparison.OrdinalIgnoreCase)
+                           || (disposition.Length == 0 && headers.ContainsKey("Content-ID")),
+            }, body);
+        }
+    }
+
+    private static byte[] DecodeBase64UrlBytes(string base64Url)
+    {
+        var base64 = base64Url.Replace('-', '+').Replace('_', '/');
+        return Convert.FromBase64String(base64.PadRight(base64.Length + (4 - base64.Length % 4) % 4, '='));
+    }
+
     private string DecodeBase64Url(string base64Url)
     {
         try
